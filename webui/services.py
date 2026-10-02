@@ -62,6 +62,9 @@ class WebDataService:
         "emulator_port": ("int", 5037),
         "trophies_multiplier": ("int", 1),
         "auto_load_queue_on_startup": ("bool", True),
+        "scrcpy_max_fps": ("int", 0),
+        "scrcpy_bitrate": ("int", 2000000),
+        "scrcpy_max_width": ("int", 0),
     }
 
     DEBUG_FIELDS: dict[str, tuple[str, Any]] = {
@@ -89,6 +92,10 @@ class WebDataService:
         "super_pixels_minimum": ("float", 1800.0),
         "gadget_pixels_minimum": ("float", 1300.0),
         "hypercharge_pixels_minimum": ("float", 1800.0),
+        # How many games one brawler gets before the rotation moves on. It was
+        # missing here, so the settings editor dropped it silently and the panel
+        # was the only way to change it.
+        "brawler_switch_after_games": ("int", 7),
     }
 
     TIMER_FIELDS: dict[str, tuple[str, Any]] = {
@@ -934,7 +941,7 @@ class WebDataService:
         auth_payload = self.get_auth_state()
         return {
             "app": {
-                "name": "PylaAI",
+                "name": "xlamBOT",
                 "version": self.get_current_version(),
                 "latest_version": self.get_latest_version_safe(),
                 "warnings": self.get_warnings(),

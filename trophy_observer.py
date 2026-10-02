@@ -9,6 +9,31 @@ from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime
 
+# Window used for the "trophies per hour" readout, and the shortest span we are
+# willing to divide by.
+#
+# The floor is deliberately long. A burst of +84 trophies in 8 minutes extrapolates
+# to "647/hour", which is arithmetically fine and completely meaningless as an
+# average pace — short windows turn every hot streak into a fake record. Under
+# 20 minutes of observation there is no rate to report, only elapsed time.
+TROPHY_RATE_WINDOW_S = 3600
+TROPHY_RATE_MIN_SPAN_S = 20 * 60
+TROPHY_RATE_MAX_WINDOW_S = 6 * 3600
+# How far the account total may plausibly move between two lobby visits.
+# Kept in step with trophy_reader's band on purpose. When the two disagreed the
+# reader could reject a number the observer would have accepted, so the looser
+# guard silently decided. 10% of 31k is 3187, which is wide enough to swallow a
+# misread digit and report it as a 1000-trophy swing.
+ACCOUNT_TOTAL_MAX_DRIFT = 400
+ACCOUNT_TOTAL_MAX_RELATIVE = 0.02
+# Absolute band for a plausible trophy total. Two matching reads are not enough on
+# their own: a systematic misread (a stray digit from the neighbouring counter)
+# repeats, and it then becomes the baseline that rejects the real number. This
+# ceiling is several times larger than the account has ever been, and exists only
+# to reject decimal-place errors.
+ACCOUNT_TOTAL_MIN = 1000
+ACCOUNT_TOTAL_MAX = 200000
+
 
 class GameMode(Enum):
     CLASSIC = "classic"
@@ -70,7 +95,18 @@ class TrophyObserver:
         self.match_history = self.load_history()
         self.last_sent_index = len(self.match_history)
         self.win_streak = 0
-        self.match_counter = 0  # New counter for the number of matches
+        self.match_counter = 0
+        # Rolling trophy timeline, used for the "trophies per hour" readout. Kept
+        # in memory only: it is a live gauge, and a restart should not make the
+        # panel claim a rate measured over hours that are no longer in view.
+        self.trophy_samples = []
+        # The account total, read from the lobby. The per-brawler number gets
+        # reset by every switch and contradicts the brawler screen, so it cannot
+        # carry a rate; this one can.
+        self.account_total = None
+        self.account_samples = []
+        # A total seen exactly once is not trusted yet; see record_account_total.
+        self._pending_account = None
         self.trophy_lose_ranges = [(49, 0), (299, 1), (599, 2), (799, 3), (999, 4), (1099, 5), (1199, 6), (1299, 7),
                                    (1499, 8), (1799, 9), (3999, 10), (float("inf"), 15)]
         self.trophy_win_ranges = [(1999, 10), (2499, 8), (2799, 6), (2999, 4), (3099, 2), (float("inf"), 1)]
@@ -96,6 +132,224 @@ class TrophyObserver:
 
     def win_streak_gain(self):
         return min(self.win_streak - 1, 10) if self.current_trophies < 2000 else 0
+
+    def record_trophy_sample(self):
+        """Append the current trophy count to the rolling timeline."""
+        if self.current_trophies is None:
+            return
+        now = time.time()
+        # Ignore repeats of the same value: the lobby OCR re-reads the number
+        # every visit, and a flat stretch must not drag the measured window.
+        if self.trophy_samples and self.trophy_samples[-1][1] == self.current_trophies:
+            return
+        self.trophy_samples.append((now, int(self.current_trophies)))
+        self.trophy_samples = [s for s in self.trophy_samples
+                               if s[0] >= now - TROPHY_RATE_MAX_WINDOW_S]
+
+    def _rate_window(self, window_s: int, samples=None):
+        """The exact sample pair the rate is derived from, or None."""
+        if samples is None:
+            samples = self.trophy_samples
+            if not samples:
+                self.record_trophy_sample()
+                samples = self.trophy_samples
+        if len(samples) < 2:
+            return None
+        cutoff = time.time() - window_s
+        # Sort defensively: a negative span would silently produce a rate with
+        # the wrong sign, which is worse than reporting nothing.
+        window = sorted((s for s in samples if s[0] >= cutoff), key=lambda s: s[0])
+        if len(window) < 2:
+            window = sorted(samples[-2:], key=lambda s: s[0])
+        span = window[-1][0] - window[0][0]
+        if span <= 0 or span < TROPHY_RATE_MIN_SPAN_S:
+            return None
+        return window[0], window[-1]
+
+    def trophy_rate_per_hour(self, window_s: int = TROPHY_RATE_WINDOW_S):
+        """Trophies per hour over the recent window, or None if unknowable yet."""
+        pair = self._rate_window(window_s)
+        if pair is None:
+            return None
+        (t0, v0), (t1, v1) = pair
+        return round((v1 - v0) / ((t1 - t0) / 3600.0), 1)
+
+    def record_account_total(self, value):
+        """Note the account's trophy total as shown in the lobby.
+
+        Rejected unless it is plausible next to the last one we believed. OCR
+        happily reads 252796 off a bar that says 29224, and a single such jump
+        would show up as thousands of trophies per hour. A real match moves the
+        total by tens, so anything beyond that band is a misread, not progress.
+        """
+        if value is None:
+            return
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            return
+        if not ACCOUNT_TOTAL_MIN <= value <= ACCOUNT_TOTAL_MAX:
+            print(f"Ignoring account total {value}: outside the plausible band "
+                  f"{ACCOUNT_TOTAL_MIN}-{ACCOUNT_TOTAL_MAX}.")
+            self._pending_account = None
+            return
+        previous = self.account_total
+        if previous is not None:
+            drift = abs(value - previous)
+            allowed = max(ACCOUNT_TOTAL_MAX_DRIFT, int(previous * ACCOUNT_TOTAL_MAX_RELATIVE))
+            if drift > allowed:
+                # The bot may genuinely have been off for a long while, and then
+                # the total really has moved by thousands. A real total keeps its
+                # digit count and leading digit; a misread usually does not. This
+                # jump is accepted only after two matching reads, because being
+                # wrong here re-bases the rate for the rest of the run.
+                same_shape = (len(str(value)) == len(str(previous))
+                              and str(value)[0] == str(previous)[0])
+                if same_shape and self._pending_account == value:
+                    self.account_total = value
+                    self._pending_account = None
+                    self._commit_account_sample(value)
+                    print(f"Account total re-based to {value}: a real jump, confirmed "
+                          f"twice (was {previous}).")
+                    return
+                if same_shape:
+                    self._pending_account = value
+                    print(f"Account total {value} read as a jump from {previous}; "
+                          "waiting for a second matching read before re-basing.")
+                    return
+                print(f"Ignoring an implausible account total {value}: it differs from "
+                      f"{previous} by {drift}, more than a match can move it ({allowed}), "
+                      "and the shape says it is not this account.")
+                return
+        else:
+            # No baseline yet, which is exactly the restart case where a bad read
+            # is accepted unchecked and 317550 turns up instead of 31606. A real
+            # number survives to the next lobby visit; a misread does not, so a
+            # value has to appear twice before it is believed.
+            if self._pending_account == value:
+                self.account_total = value
+                self._pending_account = None
+                self._commit_account_sample(value)
+                return
+            if self._pending_account is not None:
+                print(f"Account total read {self._pending_account} then {value}; "
+                      "neither was seen twice, so no total is trusted yet.")
+            self._pending_account = value
+            print(f"Account total {value} seen once, waiting for a second matching read.")
+            return
+        self._commit_account_sample(value)
+
+    def _commit_account_sample(self, value):
+        """Record a value the rate is allowed to be built from."""
+        self.account_total = value
+        self._pending_account = None
+        now = time.time()
+        if self.account_samples and self.account_samples[-1][1] == value:
+            self.save_account_state()
+            return
+        self.account_samples.append((now, value))
+        self.account_samples = [s for s in self.account_samples
+                                if s[0] >= now - TROPHY_RATE_MAX_WINDOW_S]
+        self.save_account_state()
+
+    def load_account_state(self):
+        """Adopt the last account total from a previous run.
+
+        Without this every restart starts blind: no baseline for the drift guard,
+        no anchor for the reader, and a rate that has to refill its whole
+        history before it can say anything. The value is only a hint — it still
+        has to survive the same plausibility checks before it is believed.
+        """
+        try:
+            import json
+            from utils import account_state_path
+            path = account_state_path()
+            if not path.is_file():
+                return None
+            data = json.loads(path.read_text(encoding="utf-8"))
+            value = int(data["account_total"])
+            samples = data.get("samples") or []
+        except Exception:  # noqa: BLE001
+            return None
+        if not ACCOUNT_TOTAL_MIN <= value <= ACCOUNT_TOTAL_MAX:
+            return None
+        # The rate is a list of (when, value) pairs, and those timestamps stay
+        # true across a restart - only the memory of them was lost. Without this
+        # every restart threw the measurement away and the panel sat on
+        # "collecting" for another twenty minutes before it could say anything.
+        now = time.time()
+        restored = []
+        for pair in samples:
+            try:
+                stamp, sample = float(pair[0]), int(pair[1])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if ACCOUNT_TOTAL_MIN <= sample <= ACCOUNT_TOTAL_MAX and stamp <= now:
+                restored.append((stamp, sample))
+        restored.sort()
+        self.account_samples = restored
+        self.account_total = value
+        print(f"Resumed account total {value} from {path.name} with "
+              f"{len(restored)} readings over "
+              f"{(round((restored[-1][0] - restored[0][0]) / 60.0, 1) if len(restored) > 1 else 0)} min; "
+              "it will be re-checked against the lobby before it is believed.")
+        return value
+
+    def save_account_state(self):
+        if self.account_total is None:
+            return
+        try:
+            import json
+            from utils import account_state_path
+            path = account_state_path()
+            path.write_text(json.dumps(
+                {"account_total": self.account_total,
+                 "saved_at": time.time(),
+                 "samples": [[round(stamp, 1), sample]
+                             for stamp, sample in self.account_samples]},
+                indent=2), encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def account_rate_detail(self, window_s: int = TROPHY_RATE_WINDOW_S):
+        """Trophies per hour for the whole account, over the recent window."""
+        pair = self._rate_window(window_s, self.account_samples)
+        samples = sorted(self.account_samples)
+        span_minutes = 0.0
+        if len(samples) >= 2:
+            span_minutes = round((samples[-1][0] - samples[0][0]) / 60.0, 1)
+        detail = {
+            "rate_per_hour": None,
+            "window_minutes": window_s // 60,
+            "samples": len(self.account_samples),
+            "account_total": self.account_total,
+            "measured_minutes": span_minutes,
+            "gained": 0,
+            # Why the rate is missing, in numbers. Lobby reads only happen when
+            # the bot actually reaches the lobby, and on this server that can be
+            # rare, so "no rate" needs to be explainable rather than mysterious.
+            "min_span_minutes": TROPHY_RATE_MIN_SPAN_S // 60,
+        }
+        if pair is None:
+            return detail
+        (t0, v0), (t1, v1) = pair
+        detail["rate_per_hour"] = round((v1 - v0) / ((t1 - t0) / 3600.0), 1)
+        detail["measured_minutes"] = round((t1 - t0) / 60.0, 1)
+        detail["gained"] = v1 - v0
+        return detail
+
+    def trophy_rate_detail(self, window_s: int = TROPHY_RATE_WINDOW_S):
+        rate = self.trophy_rate_per_hour(window_s)
+        samples = sorted(self.trophy_samples, key=lambda s: s[0])
+        oldest, newest = (samples[0], samples[-1]) if len(samples) >= 2 else (None, None)
+        return {
+            "rate_per_hour": rate,
+            "window_minutes": window_s // 60,
+            "samples": len(samples),
+            "trophies": self.current_trophies,
+            "measured_minutes": round((newest[0] - oldest[0]) / 60.0, 1) if oldest else 0.0,
+            "gained": (newest[1] - oldest[1]) if oldest else 0,
+        }
 
     def calc_lost_decrement(self, underdog):
         for max_trophies, loss in self.trophy_lose_ranges:
@@ -279,6 +533,7 @@ class TrophyObserver:
 
         print(f"Trophies: {old_trophies} -> {self.current_trophies}")
         print(f"Win Streak: {old_win_streak} -> {self.win_streak}")
+        self.record_trophy_sample()
         if self.current_wins:
             print(f"Current Wins: {self.current_wins}")
 
@@ -311,6 +566,7 @@ class TrophyObserver:
     def change_trophies(self, new):
         print(f"Trophies changed from {self.current_trophies} to {new}")
         self.current_trophies = new
+        self.record_trophy_sample()
 
     def send_results_to_api(self):
         new_matches = self.match_history[self.last_sent_index:]

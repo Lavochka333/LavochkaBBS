@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 
 from datetime import date
 import hmac
@@ -11,7 +12,10 @@ from flask import Flask, jsonify, render_template, request, send_file
 from werkzeug.exceptions import HTTPException
 
 from discord_bot import DiscordBot
-from utils import get_brawler_icon_path, resolve_project_path, resolve_within
+from utils import clean_queue, get_brawler_icon_path, resolve_project_path, resolve_within, \
+    save_dict_as_toml, resolve_config_path, load_toml_as_dict
+import device_profiles
+from .device_manager import DeviceRuntimeManager
 from .runtime import RuntimeManager
 from .services import WebDataService
 
@@ -54,6 +58,16 @@ class _SuppressWebhookPutting(logging.Filter):
             'PUT /api/webhook ' in message
         )
 
+class _SuppressDevicePolling(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        return not (
+            ('GET /api/devices ' in message
+             or 'GET /api/devices/status ' in message
+             or 'GET /api/devices/' in message)
+            and ' 200 -' in message
+        )
+
 def _configure_request_logging():
     werkzeug_logger = logging.getLogger("werkzeug")
     if not any(isinstance(log_filter, _SuppressRuntimeStatusPolling) for log_filter in werkzeug_logger.filters):
@@ -66,6 +80,8 @@ def _configure_request_logging():
         werkzeug_logger.addFilter(_SupressHistoryPolling())
     if not any(isinstance(log_filter, _SuppressWebhookPutting) for log_filter in werkzeug_logger.filters):
         werkzeug_logger.addFilter(_SuppressWebhookPutting())
+    if not any(isinstance(log_filter, _SuppressDevicePolling) for log_filter in werkzeug_logger.filters):
+        werkzeug_logger.addFilter(_SuppressDevicePolling())
 
 
 
@@ -98,9 +114,12 @@ def create_app(pyla_main, start_discord_bot=False):
     data_service = WebDataService(runtime_manager)
     discord_bot = DiscordBot(runtime_manager, data_service)
     runtime_manager.configure_start_gate(data_service.get_queue_data, data_service.get_auth_state)
+    device_manager = DeviceRuntimeManager(pyla_main, discord_bot)
+    device_manager.configure_queue_provider(device_profiles.load_queue)
     app.config["runtime_manager"] = runtime_manager
     app.config["data_service"] = data_service
     app.config["discord_bot"] = discord_bot
+    app.config["device_manager"] = device_manager
     app.config["discord_bot_thread"] = None
     app.config["discord_bot_lock"] = threading.Lock()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
@@ -140,7 +159,7 @@ def create_app(pyla_main, start_discord_bot=False):
         if not request.path.startswith("/api/") or request.path.startswith("/api/assets/"):
             return None
 
-        supplied_token = str(request.headers.get("X-Pyla-UI-Token", ""))
+        supplied_token = str(request.headers.get("X-Xlam-UI-Token", ""))
         if not hmac.compare_digest(supplied_token, app.config["UI_API_TOKEN"]):
             return jsonify({
                 "ok": False,
@@ -172,6 +191,233 @@ def create_app(pyla_main, start_discord_bot=False):
             "index.html",
             ui_api_token=app.config["UI_API_TOKEN"],
         )
+
+    @app.get("/panel")
+    def panel():
+        # Cache-bust the panel assets. Without it the browser keeps serving the
+        # old css/js after an edit, which looks like the change did not apply.
+        assets = [
+            resolve_project_path("static", "css", "panel.css"),
+            resolve_project_path("static", "js", "panel.js"),
+        ]
+        newest = 0.0
+        for asset in assets:
+            try:
+                newest = max(newest, os.path.getmtime(asset))
+            except OSError:
+                continue
+        return render_template(
+            "panel.html",
+            ui_api_token=app.config["UI_API_TOKEN"],
+            asset_version=int(newest) if newest else 0,
+        )
+
+    # --- Multi-device panel API ----------------------------------------------
+    def _device_key_arg():
+        key = str(request.args.get("key") or (request.get_json(silent=True) or {}).get("key") or "").strip()
+        if not key:
+            raise KeyError("A device key is required.")
+        return device_profiles.sanitize_key(key)
+
+    @app.get("/api/devices/brawlers")
+    def device_brawlers():
+        return jsonify({"ok": True, "brawlers": data_service.get_brawler_catalog()})
+
+    @app.get("/api/devices/modes")
+    def device_modes():
+        from lobby_automation import LobbyAutomation
+
+        config = load_toml_as_dict("cfg/modes_config.toml")
+        modes = []
+        for key, name in (config.get("mode") or {}).items():
+            modes.append({
+                "key": str(key),
+                "name": str(name),
+                "calibrated": bool((config.get(key) or {}).get("calibrated")),
+            })
+        return jsonify({
+            "ok": True,
+            "modes": modes,
+            "mode_button": config.get("mode_button"),
+        })
+
+    @app.post("/api/devices/<path:key>/mode")
+    def device_set_mode(key: str):
+        key = device_profiles.sanitize_key(key)
+        body = request.get_json(silent=True) or {}
+        mode = str(body.get("mode", "") or "").strip()
+        config = load_toml_as_dict("cfg/modes_config.toml")
+        if mode and mode not in (config.get("mode") or {}):
+            return jsonify({"ok": False, "message": f"Unknown game mode '{mode}'."}), 400
+        with device_profiles.use_profile(key):
+            lobby = load_toml_as_dict("cfg/lobby_config.toml")
+            lobby["game_mode"] = mode
+            save_dict_as_toml(lobby, "cfg/lobby_config.toml")
+        return jsonify({"ok": True, "mode": mode,
+                        "calibrated": not mode or bool((config.get(mode) or {}).get("calibrated"))})
+
+    @app.post("/api/devices/<path:key>/mode/calibrate")
+    def device_calibrate_mode(key: str):
+        """Store the coordinates of the mode button and one mode tile.
+
+        The user clicks them on a live screenshot, which is the only reliable
+        source: the lobby layout differs between emulators and phones.
+        """
+        key = device_profiles.sanitize_key(key)
+        body = request.get_json(silent=True) or {}
+        mode = str(body.get("mode", "") or "").strip()
+        tile = body.get("tile")
+        config = load_toml_as_dict("cfg/modes_config.toml")
+        if not mode or mode not in (config.get("mode") or {}):
+            return jsonify({"ok": False, "message": "Unknown game mode."}), 400
+        with device_profiles.use_profile(key):
+            path = resolve_config_path("cfg/modes_config.toml")
+            with open(path, "r", encoding="utf-8") as handle:
+                text = handle.read()
+            if body.get("mode_button"):
+                button = [int(body["mode_button"][0]), int(body["mode_button"][1])]
+                config["mode_button"] = button
+            entry = dict(config.get(mode) or {})
+            if tile:
+                entry["tile"] = [int(tile[0]), int(tile[1])]
+                entry["calibrated"] = True
+            config[mode] = entry
+            save_dict_as_toml(config, "cfg/modes_config.toml")
+        return jsonify({"ok": True, "mode": mode, "entry": config.get(mode),
+                        "mode_button": config.get("mode_button")})
+
+    @app.get("/api/devices")
+    def list_devices():
+        devices = DeviceRuntimeManager.list_adb_devices()
+        if devices and "ok" in devices[0]:
+            return jsonify({"ok": False, "message": devices[0].get("message", "ADB unavailable"), "devices": []}), 200
+        statuses = {status["key"]: status for status in device_manager.all_statuses()}
+        for device in devices:
+            device["runtime"] = statuses.get(device["key"], {
+                "state": "idle", "is_running": False, "last_error": "",
+                "started_at": None, "uptime_seconds": None,
+            })
+            try:
+                device["meta"] = device_profiles.read_profile_meta(device["key"])
+            except Exception:
+                device["meta"] = {}
+        return jsonify({"ok": True, "devices": devices, "profiles": device_profiles.list_profiles()})
+
+    @app.get("/api/devices/status")
+    def devices_status():
+        return jsonify({"ok": True, "runtimes": device_manager.all_statuses()})
+
+    @app.post("/api/devices/connect")
+    def device_connect():
+        payload = request.get_json(silent=True) or {}
+        return jsonify(DeviceRuntimeManager.connect_network_device(payload.get("address", "")))
+
+    @app.post("/api/devices/disconnect")
+    def device_disconnect():
+        payload = request.get_json(silent=True) or {}
+        return jsonify(DeviceRuntimeManager.disconnect_network_device(payload.get("address", "")))
+
+    @app.post("/api/devices/prepare")
+    def device_prepare():
+        payload = request.get_json(silent=True) or {}
+        serial = str(payload.get("serial") or "").strip()
+        if not serial:
+            raise KeyError("A device serial is required.")
+        width = int(payload.get("width") or 1920)
+        height = int(payload.get("height") or 1080)
+        return jsonify(DeviceRuntimeManager.prepare_device(serial, width, height))
+
+    @app.post("/api/devices/reset-display")
+    def device_reset_display():
+        payload = request.get_json(silent=True) or {}
+        serial = str(payload.get("serial") or "").strip()
+        if not serial:
+            raise KeyError("A device serial is required.")
+        return jsonify(DeviceRuntimeManager.reset_device_display(serial))
+
+    @app.post("/api/devices/selftest")
+    def device_selftest():
+        payload = request.get_json(silent=True) or {}
+        serial = str(payload.get("serial") or "").strip()
+        if not serial:
+            raise KeyError("A device serial is required.")
+        return jsonify(DeviceRuntimeManager.selftest_device(serial))
+
+    @app.get("/api/devices/<path:key>/queue")
+    def device_queue(key: str):
+        return jsonify({"ok": True, "items": device_profiles.load_queue(key)})
+
+    @app.post("/api/devices/<path:key>/queue")
+    def device_queue_save(key: str):
+        payload = request.get_json(silent=True) or {}
+        items = payload.get("items")
+        if not isinstance(items, list):
+            raise KeyError("A list of queue items is required.")
+        device_profiles.save_queue(key, items)
+        return jsonify({"ok": True, "items": device_profiles.load_queue(key)})
+
+    @app.get("/api/devices/<path:key>/settings")
+    def device_settings(key: str):
+        return jsonify({"ok": True, "settings": device_profiles.read_settings(key)})
+
+    @app.post("/api/devices/<path:key>/settings")
+    def device_settings_update(key: str):
+        payload = request.get_json(silent=True) or {}
+        section = str(payload.get("section") or "").strip()
+        updates = payload.get("values")
+        if not section or not isinstance(updates, dict):
+            raise KeyError("Both 'section' and 'values' are required.")
+        return jsonify({"ok": True, "settings": device_profiles.update_settings(key, section, updates)})
+
+    @app.post("/api/devices/<path:key>/start")
+    def device_start(key: str):
+        payload = request.get_json(silent=True) or {}
+        result = device_manager.start(key, payload.get("serial"))
+        status_code = 200 if result.get("ok") else (400 if result.get("code") else 409)
+        return jsonify({**result, "runtime": device_manager.get_status(key)}), status_code
+
+    @app.post("/api/devices/<path:key>/pause")
+    def device_pause(key: str):
+        result = device_manager.pause(key)
+        return jsonify({**result, "runtime": device_manager.get_status(key)}), 200 if result.get("ok") else 409
+
+    @app.post("/api/devices/<path:key>/resume")
+    def device_resume(key: str):
+        result = device_manager.resume(key)
+        return jsonify({**result, "runtime": device_manager.get_status(key)}), 200 if result.get("ok") else 409
+
+    @app.post("/api/devices/<path:key>/stop")
+    def device_stop(key: str):
+        result = device_manager.stop(key)
+        return jsonify({**result, "runtime": device_manager.get_status(key)}), 200 if result.get("ok") else 409
+
+    @app.post("/api/devices/stop-all")
+    def devices_stop_all():
+        result = device_manager.stop_all()
+        return jsonify({**result, "runtimes": device_manager.all_statuses()})
+
+    @app.get("/api/devices/<path:key>/logs")
+    def device_logs(key: str):
+        limit = int(request.args.get("limit", 400))
+        return jsonify({"ok": True, "logs": device_manager.get_logs(key, limit=limit)})
+
+    @app.delete("/api/devices/<path:key>/logs")
+    def device_logs_clear(key: str):
+        device_manager.clear_logs(key)
+        return jsonify({"ok": True, "logs": []})
+
+    @app.get("/api/devices/<path:key>/telemetry")
+    def device_telemetry(key: str):
+        return jsonify({"ok": True, "telemetry": device_manager.telemetry(key)})
+
+    @app.get("/api/devices/<path:key>/snapshot")
+    def device_snapshot(key: str):
+        image = device_manager.snapshot_jpeg(key)
+        if not image:
+            return ("", 404)
+        response = app.response_class(image, mimetype="image/jpeg")
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.get("/api/bootstrap")
     def bootstrap():

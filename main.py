@@ -32,13 +32,13 @@ if __name__ == "__main__" and len(sys.argv) >= 9 and sys.argv[1] == "--debug-vie
 
 def parse_cli_args(argv=None):
     parser = argparse.ArgumentParser(
-        prog="PylaAI",
-        description="PylaAI, the best free and open source brawl stars bot.",
+        prog="xlamBOT",
+        description="xlamBOT, the best free and open source brawl stars bot.",
     )
     parser.add_argument(
         "--no-console",
         action="store_true",
-        help="Hide PylaAI's own console and write output to a log file.",
+        help="Hide xlamBOT's own console and write output to a log file.",
     )
     interface_group = parser.add_mutually_exclusive_group()
     interface_group.add_argument(
@@ -111,7 +111,7 @@ if CLI_ARGS.no_console:
 
 if CLI_ARGS.no_console and not CONSOLE_HIDDEN:
     print(
-        "--no-console ignored: this console belongs to the terminal PylaAI was "
+        "--no-console ignored: this console belongs to the terminal xlamBOT was "
         "started from, so output stays here."
     )
 
@@ -505,7 +505,7 @@ def open_browser_later(local_url):
 def stop_on_window_close(app):
     """Ask a running bot instance to stop when its desktop window closes."""
     def _on_close():
-        print("PylaAI window closed, shutting down.")
+        print("xlamBOT window closed, shutting down.")
         try:
             app.config["runtime_manager"].stop()
         except Exception as error:
@@ -532,14 +532,14 @@ def run_interface(app, local_url, interface_mode):
 
     if interface_mode == "browser":
         open_browser_later(local_url)
-        print("PylaAI is opening the local web UI in the system browser.")
+        print("xlamBOT is opening the local web UI in the system browser.")
     else:
-        print(f"PylaAI is running headless. Open {local_url} manually to use the local web UI.")
+        print(f"xlamBOT is running headless. Open {local_url} manually to use the local web UI.")
 
     app.run(host="127.0.0.1", port=int(local_url.rsplit(":", 1)[1]), debug=False, use_reloader=False)
 
 if __name__ == "__main__":
-    print("Starting PylaAI, the best free and open source brawl stars bot")
+    print("Starting xlamBOT, the best free and open source brawl stars bot")
     print("The only official discord is", get_discord_link())
     from webui import create_app
 

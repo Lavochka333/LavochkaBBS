@@ -26,7 +26,7 @@ const GAMEMODE_LABELS = {
     other: "Other",
 };
 
-const UI_API_TOKEN = document.querySelector('meta[name="pyla-ui-token"]')?.content || "";
+const UI_API_TOKEN = document.querySelector('meta[name="xlam-ui-token"]')?.content || "";
 
 const GAMEMODE_LOGOS = new Set([
     "brawlball", "bounty", "duo_showdown", "gem_grab", "heist", "hot_zone",
@@ -182,7 +182,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     try {
         await bootstrap();
     } catch (error) {
-        showToast(error.message || "Unable to load the PylaAI UI.", "error");
+        showToast(error.message || "Unable to load the xlamBOT UI.", "error");
     }
 });
 
@@ -426,7 +426,7 @@ function showPendingAnnouncements() {
             <section class="modal" style="max-width: 520px;">
                 <header class="modal-header">
                     <p class="eyebrow">Announcement</p>
-                    <h3 id="announcementTitle">${escapeHtml(announcement.title || "PylaAI announcement")}</h3>
+                    <h3 id="announcementTitle">${escapeHtml(announcement.title || "xlamBOT announcement")}</h3>
                     <p style="margin-top: 14px; white-space: pre-wrap; line-height: 1.6;">${escapeHtml(announcement.message || "")}</p>
                 </header>
                 <div style="display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 24px;">
@@ -461,7 +461,7 @@ function renderDashboard() {
                 : isPaused
                     ? "Pyla is paused. Press Start to resume."
                     : canStart
-                        ? "Queue is ready. Start PylaAI from here."
+                        ? "Queue is ready. Start xlamBOT from here."
                         : queue.length
                             ? "Resolve the current runtime state before starting."
                             : "Add at least one brawler to the queue before starting.";
@@ -483,7 +483,7 @@ function renderDashboard() {
     } else if (["running", "pausing"].includes(runtime.state)) {
         runtimePanel = `
             <div class="runtime-live-shell">
-                <h3 class="runtime-live-title">${runtime.state === "pausing" ? "PylaAI is pausing" : "PylaAI is currently running"}</h3>
+                <h3 class="runtime-live-title">${runtime.state === "pausing" ? "xlamBOT is pausing" : "xlamBOT is currently running"}</h3>
                 <p class="runtime-note">${escapeHtml(statusCopy)}</p>
                 <div class="runtime-action-grid">
                     <button id="pauseRuntimeBtn" class="btn btn-primary btn-runtime-action ${runtime.state === "pausing" ? "runtime-transition-button is-pausing is-disabled" : ""}">${iconMarkup("pause")} Pause</button>
@@ -493,7 +493,7 @@ function renderDashboard() {
     } else if (isPaused) {
         runtimePanel = `
             <div class="runtime-live-shell">
-                <h3 class="runtime-live-title">PylaAI is paused</h3>
+                <h3 class="runtime-live-title">xlamBOT is paused</h3>
                 <p class="runtime-note">${escapeHtml(statusCopy)}</p>
                 <div class="runtime-action-grid">
                     <button id="resumeRuntimeBtn" class="btn btn-primary btn-runtime-action">${iconMarkup("play")} Start</button>
@@ -3203,7 +3203,7 @@ async function fetchJSON(url, options = {}, allowFailure = false) {
     }
 
     const headers = new Headers(options.headers || {});
-    headers.set("X-Pyla-UI-Token", UI_API_TOKEN);
+    headers.set("X-Xlam-UI-Token", UI_API_TOKEN);
     const response = await fetch(url, {
         ...options,
         headers,

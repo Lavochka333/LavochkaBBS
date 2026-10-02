@@ -1,4 +1,4 @@
-"""Desktop startup helpers for the local PylaAI web interface."""
+"""Desktop startup helpers for the local xlamBOT web interface."""
 
 from __future__ import annotations
 
@@ -11,10 +11,10 @@ from typing import Any, Callable
 
 
 IS_WINDOWS = os.name == "nt"
-WINDOW_TITLE = "PylaAI"
+WINDOW_TITLE = "xlamBOT"
 WINDOW_SIZE = (1440, 900)
 APP_ICON_PATH = Path(__file__).resolve().parent / "images" / "logo.ico"
-WINDOWS_APP_ID = "PylaAI.Desktop"
+WINDOWS_APP_ID = "xlamBOT.Desktop"
 _SW_HIDE = 0
 _BUNDLED_WEBVIEW_BINARIES = (
     Path("pythonnet/runtime/Python.Runtime.dll"),
@@ -31,9 +31,9 @@ def console_log_path() -> Path:
 
 
 def hide_console(log_path: Path | None = None) -> bool:
-    """Hide a console owned only by PylaAI and redirect its streams to a log.
+    """Hide a console owned only by xlamBOT and redirect its streams to a log.
 
-    A console shared with the terminal that launched PylaAI is deliberately left
+    A console shared with the terminal that launched xlamBOT is deliberately left
     alone, because hiding it would also hide the user's terminal window.
     """
     if not IS_WINDOWS:
@@ -91,14 +91,14 @@ def _redirect_standard_streams(log_path: Path) -> None:
 
 
 def unblock_bundled_webview_binaries(base_dir: Path | None = None) -> list[Path]:
-    """Remove Internet-zone markers from the .NET files shipped with PylaAI.
+    """Remove Internet-zone markers from the .NET files shipped with xlamBOT.
 
     Windows propagates the downloaded ZIP's ``Zone.Identifier`` stream to
     extracted files.  The executable itself may still run, but .NET Framework
     then refuses to load Python.Runtime.dll and clr_loader reports the rather
     misleading "Failed to resolve ... Loader.Initialize" error.
 
-    Only PylaAI's explicitly listed pywebview/pythonnet binaries are touched.
+    Only xlamBOT's explicitly listed pywebview/pythonnet binaries are touched.
     Source checkouts normally have none of these files next to desktop.py, so
     this is effectively a frozen-build startup repair.
     """
@@ -196,7 +196,7 @@ def run_webview(
         )
         if on_close is not None:
             window.events.closed += lambda *_args: on_close()
-        print("PylaAI is running in a pywebview desktop window.")
+        print("xlamBOT is running in a pywebview desktop window.")
         icon = str(APP_ICON_PATH) if APP_ICON_PATH.is_file() else None
         webview_module.start(icon=icon)
     finally:

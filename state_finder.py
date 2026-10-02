@@ -112,6 +112,10 @@ def get_in_game_state(image):
         last_debug_print_time = current_time
 
     try:
+        # First, because the dialog covers the lobby and the lobby template still
+        # matches through it. Checked later, the lobby would win every time and
+        # the dialog would never be seen.
+        if is_in_connection_lost(image): return "connection_lost"
         if should_print_debug_info: print("Checking for match result...")
         game_result = is_in_end_of_a_match(image)
         if game_result: return f"end_{game_result}"
@@ -144,6 +148,20 @@ def get_in_game_state(image):
 
 def is_in_shop(image) -> bool:
     return is_template_in_region(image, states_path + 'powerpoint.png', region_data["powerpoint"])
+
+
+def is_in_connection_lost(image) -> bool:
+    """The private server drops the connection and puts a dialog up.
+
+    Scored 0.99 on three emulators showing the dialog and 0.23-0.43 on ordinary
+    lobby and match screens, so the shared 0.75 threshold separates them with
+    room to spare.
+    """
+    region = region_data.get("connection_lost_dialog")
+    if not region:
+        return False
+    return is_template_in_region(
+        image, states_path + 'connection_lost_dialog.png', region)
 
 
 def is_in_brawler_selection(image) -> bool:

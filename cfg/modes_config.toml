@@ -1,0 +1,56 @@
+# Game mode selection.
+#
+# The bot taps the mode button in the lobby, then the tile of the wanted mode.
+# Coordinates are in the 1920x1080 base the rest of the project uses, and are
+# scaled to the device automatically.
+#
+# `calibrated = false` means the coordinates are still the built-in guess. The
+# panel shows that state so a mode is never silently ignored: calibrate the
+# button and the tiles once from the panel, then they are stored here.
+#
+# Order of `tiles` is the order the modes appear in the mode list of the game,
+# which is why the defaults are spread out rather than stacked.
+
+mode_button = [1470, 980]
+mode_list_open_delay = 1.2
+mode_pick_delay = 1.5
+
+[mode]
+# key = name shown in the panel
+solo_showdown = "Одиночное шоудаун"
+duo_showdown = "Парное шоудаун"
+trio_showdown = "Тройное шоудаун"
+heist = "Ограбление"
+bounty = "Охота за баунти"
+gem_grab = "Сбор кристаллов"
+knockout = "Нокаут"
+hot_zone = "Горячая зона"
+siege = "Осада"
+
+[solo_showdown]
+tile = [1600, 700]
+calibrated = false
+[duo_showdown]
+tile = [1600, 790]
+calibrated = false
+[trio_showdown]
+tile = [1600, 880]
+calibrated = false
+[heist]
+tile = [1600, 610]
+calibrated = false
+[bounty]
+tile = [1600, 970]
+calibrated = false
+[gem_grab]
+tile = [1600, 1060]
+calibrated = false
+[knockout]
+tile = [1600, 880]
+calibrated = false
+[hot_zone]
+tile = [1600, 970]
+calibrated = false
+[siege]
+tile = [1600, 610]
+calibrated = false

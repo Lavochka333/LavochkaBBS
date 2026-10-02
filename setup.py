@@ -9,14 +9,14 @@ import importlib
 # --- LOOP-PROOF BOOTSTRAP ---
 
 def bootstrap():
-    if os.environ.get("PYLAAI_BOOTSTRAP") == "1":
+    if os.environ.get("XLAMBOT_BOOTSTRAP") == "1":
         return
     try:
         import jaraco.functools
         import wheel
     except ImportError:
         print("\nDetected missing core tools. Stabilizing environment...")
-        os.environ["PYLAAI_BOOTSTRAP"] = "1"
+        os.environ["XLAMBOT_BOOTSTRAP"] = "1"
         subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
         print("Environment stabilized. Restarting setup...\n")
         subprocess.run([sys.executable] + sys.argv)
@@ -93,7 +93,7 @@ install_requires = [
 ]
 
 setup(
-    name="PylaAI",
+    name="xlamBOT",
     version="1.0.0",
     packages=find_packages(exclude=["api", "cfg", "images", "models"]),
     install_requires=install_requires,

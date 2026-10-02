@@ -8,7 +8,7 @@ venv/
 /dist
 /build
 main.spec
-PylaAI.zip
+xlamBOT.zip
 start.bat
 run.py
 stuff_to_copy_paste/
@@ -32,3 +32,36 @@ pyla-v0.9.6.zip
 api/namcheap_app.py
 api/bot.py
 api/ANNOUNCEMENTS.md
+
+# ── xlamBOT: локальное и служебное, публиковать не нужно ──
+
+# логи запусков
+*.out
+*.err
+*.log
+*.lock
+
+# кадры разбора матчей и отладки (занимали больше 180 МБ)
+audit_frames/
+debug_shots/
+debug_frames/
+
+# накопленные данные разбора
+match_audit*.jsonl
+
+# локальное состояние устройств: настройки и история матчей
+devices/
+latest_brawler_data.json
+account_state.json
+
+# данные для переобучения моделей, для запуска не нужны
+gas_dataset/
+
+# черновые скрипты
+acc.py
+v5.py
+ver.py
+
+# личная история матчей: в публичный репозиторий не выкладываем
+cfg/match_history.csv
+

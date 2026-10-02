@@ -59,7 +59,7 @@ class DebugViewPublisher:
         self,
         enabled=False,
         max_fps=DEFAULT_DEBUG_VIEW_FPS,
-        title="PylaAI Debug View",
+        title="xlamBOT Debug View",
         advanced_visuals=False,
         record_clips=False,
     ):

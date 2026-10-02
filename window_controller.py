@@ -14,6 +14,10 @@ brawl_stars_width, brawl_stars_height = 1920, 1080
 
 press_coords_dict = load_toml_as_dict("cfg/buttons_config.toml")
 KNOWN_BS_PACKAGES = ("com.supercell.brawlstars", "bsd.suitcase.release")
+# Приватные сборки отличаются от release только суффиксом: nexusv2, nexus и
+# подобные. Перечислять их по одному бессмысленно, поэтому любое имя семейства
+# bsd.suitcase.* считается игрой.
+PRIVATE_BS_PREFIXES = ("bsd.suitcase.",)
 
 
 def restart_adb_server() -> None:
@@ -39,6 +43,66 @@ def online_devices():
         if state == "device":
             out.append(d)
     return out
+
+
+def get_device_by_serial(serial) -> AdbDevice:
+    """The connected ADB device with this serial.
+
+    Several devices can be online at once, so a caller that already knows which
+    phone it means must get that one instead of whichever device discovery
+    happens to prefer. A profile key is a filesystem-safe form of the serial
+    ("127.0.0.1-5555"), so that spelling is accepted too.
+    """
+    wanted = str(serial or "").strip()
+    if not wanted:
+        raise ValueError("No device serial was given.")
+    try:
+        devices = online_devices()
+    except Exception as e:
+        raise ConnectionError(f"Could not list ADB devices: {e}") from e
+
+    wanted_key = wanted.replace(":", "-").lower()
+    for device in devices:
+        if device.serial == wanted or device.serial.replace(":", "-").lower() == wanted_key:
+            return device
+
+    online = [device.serial for device in devices]
+    if online:
+        raise ConnectionError(f"Device '{wanted}' is not connected. Online devices: {online}.")
+    raise ConnectionError(f"No ADB devices are online, so '{wanted}' is unavailable.")
+
+
+def is_brawl_stars_package(target) -> bool:
+    """Whether Brawl Stars is the package in the foreground.
+
+    Accepts either the package name or a device: the panel only has the name it
+    read off `app_current()`, while the bot compares names it was configured
+    with. A missing name simply means the game is not in front.
+    """
+    package = target
+    if not isinstance(target, str):
+        try:
+            package = target.app_current().package
+        except Exception as e:
+            print(f"Error reading the foreground app: {e}")
+            return False
+    package = str(package or "").strip()
+    if not package:
+        return False
+    if any(package == known or package.startswith(f"{known}.")
+           for known in KNOWN_BS_PACKAGES):
+        return True
+    if package.startswith(PRIVATE_BS_PREFIXES):
+        return True
+    # Finally whatever this project was pointed at: the name in general_config
+    # is what the bot launches and stops, so it counts even if it matches no
+    # pattern above.
+    try:
+        configured = load_toml_as_dict(
+            "cfg/general_config.toml").get("brawl_stars_package")
+    except Exception:  # noqa: BLE001
+        configured = None
+    return bool(configured) and package == str(configured).strip()
 
 
 def adb_device_port_sort_key(device: AdbDevice) -> tuple[float, int, str]:
@@ -116,7 +180,7 @@ def discover_device(verbose: bool = False) -> AdbDevice:
     return chosen
 
 class WindowController:
-    def __init__(self, max_fps="auto"):
+    def __init__(self, max_fps="auto", serial=None):
         self.scale_factor = None
         self.width = None
         self.height = None
@@ -129,10 +193,17 @@ class WindowController:
             load_toml_as_dict("cfg/debug_settings.toml").get("verbose_debug"),
             False
         )
+        # Pinned only when the caller names a device; otherwise discovery picks
+        # one and self.serial is whatever that device turned out to be.
+        self.serial = str(serial).strip() if serial else None
         print("Connecting to ADB (might take up to 2 minutes)...")
         try:
-            self.device = discover_device(verbose=self.verbose_debug)
-            print(f"Connected to device: {self.device.serial}")
+            if self.serial:
+                self.device = get_device_by_serial(self.serial)
+            else:
+                self.device = discover_device(verbose=self.verbose_debug)
+            self.serial = self.device.serial
+            print(f"Connected to device: {self.serial}")
 
             self.frame_lock = threading.Lock()
             self.max_fps = max_fps
@@ -164,11 +235,55 @@ class WindowController:
         self.PID_JOYSTICK = 1
         self.PID_ATTACK = 2
 
+    def latest_frame_copy(self):
+        """Non-blocking snapshot of the newest frame, for the web panel preview.
+
+        Returns ``(frame, timestamp)`` and never waits: the panel polls this
+        several times a second and must not stall behind the capture stream.
+        """
+        frame, frame_time = self.get_latest_frame()
+        if frame is None:
+            return None, 0.0
+        try:
+            return frame.copy(), frame_time
+        except Exception:  # noqa: BLE001
+            return None, frame_time
+
+    def frame_to_jpeg(self, frame, quality: int = 70) -> bytes:
+        """Encode a frame as JPEG bytes; empty when there is nothing to encode."""
+        if frame is None:
+            return b""
+        try:
+            import cv2
+
+            ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
+            if not ok:
+                return b""
+            return buffer.tobytes()
+        except Exception:  # noqa: BLE001
+            return b""
+
     def get_latest_frame(self):
         with self.frame_lock:
             if self.last_frame is None:
                 return None, 0.0
             return self.last_frame, self.last_frame_time
+
+    def is_stream_alive(self) -> bool:
+        """Whether the scrcpy stream itself is still connected.
+
+        The encoder stops emitting frames while the screen does not change, so a
+        fresh frame proves nothing here: a live stream showing a still screen is
+        a normal pause (a match loading, the emulator backgrounded), not a broken
+        feed, and reconnecting would only throw away a working connection.
+        """
+        client = getattr(self, "scrcpy_client", None)
+        if client is None or not getattr(client, "alive", False):
+            return False
+        thread = getattr(client, "stream_loop_thread", None)
+        if thread is not None and not thread.is_alive():
+            return False
+        return True
 
     def force_rediscover(self) -> bool:
         print("Restarting ADB server and re-discovering device.")
@@ -178,11 +293,17 @@ class WindowController:
             pass
         restart_adb_server()
         try:
-            new_dev = discover_device(self.verbose_debug)
-        except ConnectionError:
+            if self.serial:
+                # Stay on the phone this instance was started for: with several
+                # devices online, discovery would otherwise hand back another.
+                new_dev = get_device_by_serial(self.serial)
+            else:
+                new_dev = discover_device(self.verbose_debug)
+        except (ConnectionError, ValueError):
             return False
         self.device = new_dev
-        print(f"Re-discovered device: {self.device.serial}")
+        self.serial = self.device.serial
+        print(f"Re-discovered device: {self.serial}")
         return True
 
     def reconnect_scrcpy(self, max_retries=3):
@@ -236,6 +357,35 @@ class WindowController:
             time.sleep(2 * attempt)
 
         print("All scrcpy reconnect attempts exhausted")
+        return False
+
+    def launch_brawl_stars(self):
+        """Bring Brawl Stars back to the foreground.
+
+        A game that only lost the foreground is merely re-launched, while a dead
+        process is restarted outright: stopping a live game would throw away the
+        match it is in the middle of.
+        """
+        if self.brawl_stars_process_alive():
+            self.device.app_start(self.BRAWL_STARS_PACKAGE)
+            time.sleep(2)
+            print("Brawl Stars brought back to the foreground.")
+            return
+        self.restart_brawl_stars()
+
+    def brawl_stars_process_alive(self) -> bool:
+        """Whether the Brawl Stars process is running on the device.
+
+        Cheaper and more direct than reading the foreground app, which answers
+        about whatever happens to be on screen (a screen saver, a system dialog)
+        rather than about the game.
+        """
+        for package in (self.BRAWL_STARS_PACKAGE, *KNOWN_BS_PACKAGES):
+            try:
+                if self.device.shell(["pidof", package], timeout=5).strip():
+                    return True
+            except Exception as e:
+                print(f"Error checking whether '{package}' is running: {e}")
         return False
 
     def restart_brawl_stars(self):

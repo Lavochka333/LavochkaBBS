@@ -39,11 +39,23 @@ class ThreadFilterStream:
 
             lines = combined.split("\n")
             self.thread_buffers[thread_name] = [lines[-1]]
+            device_lines = []
             for line in lines[:-1]:
                 log_line = self.ANSI_CLEAN_RE.sub("", line)
                 if self.is_stderr:
                     log_line = f"[stderr] {log_line}"
                 GLOBAL_LOGS.append(log_line)
+                device_lines.append(log_line)
+
+        # Multi-device mode: also file the line under the device that produced it.
+        try:
+            from .device_manager import current_log_target, LOG_HUB
+
+            device_key = current_log_target()
+        except Exception:
+            device_key = None
+        if device_key and device_lines:
+            LOG_HUB.append_bulk(device_key, device_lines)
 
     def flush(self):
         self.original_stream.flush()

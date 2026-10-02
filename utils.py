@@ -4,7 +4,9 @@ import io
 import math
 import os
 import random
+import threading
 import time
+from contextlib import contextmanager
 from io import BytesIO
 import ctypes
 import json
@@ -54,27 +56,112 @@ def resolve_playstyle_path(filename) -> Path:
     return resolve_within("playstyles", filename)
 
 
+# Several bots can run at once and each one reads its own device profile, so the
+# active config root is per thread rather than a global. Nothing sets it here,
+# which keeps a plain single-device run on the repository's cfg/ as before.
+_config_scope_state = threading.local()
+
+
+def get_config_root() -> Path:
+    """The directory whose config files take precedence for this thread."""
+    root = getattr(_config_scope_state, "root", None)
+    return Path(root) if root is not None else resolve_project_path("cfg")
+
+
+@contextmanager
+def config_scope(root):
+    """Route config reads to `root` for the duration of the block.
+
+    device_profiles owns where a device's files live; this only switches the
+    root, so a scope nested inside another one restores the previous root on
+    the way out instead of leaking the device into the rest of the process.
+    """
+    previous = getattr(_config_scope_state, "root", None)
+    _config_scope_state.root = Path(root) if root is not None else None
+    try:
+        yield get_config_root()
+    finally:
+        _config_scope_state.root = previous
+
+
+def _config_file_path(file_path) -> Path:
+    """Where a `cfg/...` read or write actually lands.
+
+    Inside a device profile the device's own copy wins, and anything it does not
+    carry falls back to the repository — that is what makes a profile a set of
+    overrides rather than a copy that has to be kept complete.
+    """
+    raw = str(file_path).lstrip("/\\")
+    # A leading "./" must go before the cfg check below. Path.joinpath happily
+    # swallows it when building the fallback path, so "./cfg/x.toml" used to look
+    # fine and still resolved to the repository - which silently ignored every
+    # device profile for all eleven "./cfg/..." call sites.
+    while raw.startswith("./") or raw.startswith(".\\"):
+        raw = raw[2:]
+    if raw.startswith("cfg/") or raw.startswith("cfg\\"):
+        return resolve_config_path(raw[4:])
+    return PROJECT_ROOT.joinpath(raw)
+
+
+def resolve_config_path(*parts) -> Path:
+    """Resolve a `cfg/...` path to the copy that currently applies.
+
+    A device profile only has to carry the files it actually overrides, so its
+    own copy wins when it exists and the repository's cfg/ answers otherwise.
+    The leading `cfg` is optional and the result can never escape the root.
+    """
+    tail = [part for part in Path(*[str(part) for part in parts]).parts if part not in (".", "")]
+    if tail and tail[0].lower() == "cfg":
+        tail = tail[1:]
+    if tail and ".." not in tail:
+        candidate = get_config_root().joinpath(*tail)
+        if candidate.is_file():
+            return candidate
+    return resolve_within("cfg", *tail)
+
+
 cached_toml = {}
+def _merge_over(base, override):
+    """Overlay `override` on `base`, recursing into nested tables."""
+    merged = dict(base)
+    for key, value in (override or {}).items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_over(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def load_toml_as_dict(file_path, cache=True):
-    full_path = PROJECT_ROOT / str(file_path).lstrip('/\\')
+    full_path = _config_file_path(file_path)
     if str(full_path) in cached_toml and cache:
         return cached_toml[str(full_path)]
     try:
         with open(full_path, 'r', encoding='utf-8') as f:
             data = toml.load(f)
-            cached_toml[str(full_path)] = data
-            return data
     except Exception as e:
         print(f"Error loading {full_path}: {e}")
         return {}
+    # A device profile overrides the repository rather than replacing it. Without
+    # this a profile file holding three keys would hide every other key in the
+    # repository's copy — which is how the brawler-sort coordinates went missing.
+    repo_path = PROJECT_ROOT.joinpath(str(file_path).lstrip('/\\'))
+    if str(repo_path) != str(full_path) and repo_path.exists():
+        try:
+            with open(repo_path, 'r', encoding='utf-8') as f:
+                data = _merge_over(toml.load(f), data)
+        except Exception as e:  # noqa: BLE001
+            print(f"Error merging {repo_path} under {full_path}: {e}")
+    cached_toml[str(full_path)] = data
+    return data
 
 def invalidate_toml_cache(file_path):
-    full_path = PROJECT_ROOT / str(file_path).lstrip('/\\')
+    full_path = _config_file_path(file_path)
     cached_toml.pop(str(full_path), None)
 
 
 def save_dict_as_toml(data, file_path):
-    full_path = PROJECT_ROOT / str(file_path).lstrip('/\\')
+    full_path = _config_file_path(file_path)
     with open(full_path, 'w', encoding='utf-8') as f:
         toml.dump(data, f)
     cached_toml[str(full_path)] = data
@@ -119,17 +206,45 @@ def count_mask_pixels(mask, x1, y1, x2, y2):
         return 0
     return cv2.countNonZero(mask[y1:y2, x1:x2])
 
+def brawler_queue_path() -> Path:
+    """Where the brawler queue lives.
+
+    With one device that is the project root. Inside a device profile the queue
+    belongs to that device, and sits beside its cfg directory — otherwise every
+    bot would read and overwrite the same list, and the panel would show one
+    device's roster for all of them.
+    """
+    root = get_config_root()
+    if root != resolve_project_path("cfg"):
+        return root.parent / "latest_brawler_data.json"
+    return resolve_project_path("latest_brawler_data.json")
+
+
+def account_state_path() -> Path:
+    """Where the account-wide counters live between restarts.
+
+    The account total is the only figure that can carry an hourly rate, and a
+    rate needs history. Keeping the last value next to the device's own queue
+    means a restart resumes the measurement instead of starting over and waiting
+    for two more lobby reads.
+    """
+    root = get_config_root()
+    if root != resolve_project_path("cfg"):
+        return root.parent / "account_state.json"
+    return resolve_project_path("account_state.json")
+
+
 def save_brawler_data(data):
     """
     Save the given data to a json file. As a list of dictionaries.
     """
-    queue_path = resolve_project_path("latest_brawler_data.json")
+    queue_path = brawler_queue_path()
     with open(queue_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4)
 
 
 def load_brawler_data():
-    queue_path = resolve_project_path("latest_brawler_data.json")
+    queue_path = brawler_queue_path()
     if not queue_path.exists():
         return []
     try:
@@ -200,7 +315,12 @@ def clean_queue(data):
             except ValueError:
                 push_until = 0
 
-        if value < push_until:
+        # The brawler is kept whatever the trophy count says. This used to drop
+        # anyone at or above the target, and since the count comes from OCR a
+        # single bad read deleted the brawler from the queue for good — and when
+        # it was the only one, the bot refused to start at all. Trophies are not
+        # a reason to drop anyone: the game decides who plays, not this list.
+        if True:
             final_brawler_data = {"brawler": brawler_data['brawler'], "type": type_of_push, "trophies": current_trophies, "wins": current_wins, "push_until": push_until, "automatically_pick": automatically_pick, "win_streak": current_win_streak}
             cleaned_data.append(final_brawler_data)
     return cleaned_data
@@ -229,10 +349,38 @@ def find_template_center(main_img, template, threshold=0.8):
         return False
 
 
+BRAWLER_ALIASES = {
+    "jess": "jessie",
+}
+
+
+def _with_brawler_aliases(info):
+    """The brawler table with the keys it can also be reached under.
+
+    A queue can name a brawler differently from the table (Jess is stored as
+    "jessie"), and play.py as well as the playstyles look the entry up with a
+    plain dict access, so an unrecognised spelling was a hard failure rather
+    than a miss. The original keys are kept as they are and every alias points
+    at the very same entry, so a profile that overrides one brawler still sees
+    all of them.
+    """
+    if not info:
+        return {}
+    aliased = dict(info)
+    for key in list(aliased):
+        normalized = normalize_brawler_filename(key)
+        if normalized and normalized != key:
+            aliased.setdefault(normalized, aliased[key])
+    for alias, key in BRAWLER_ALIASES.items():
+        if key in aliased:
+            aliased.setdefault(alias, aliased[key])
+    return aliased
+
+
 def load_brawlers_info():
     if os.path.exists(brawlers_info_file_path):
         with open(brawlers_info_file_path, 'r') as f:
-            return json.load(f)
+            return _with_brawler_aliases(json.load(f))
     else:
         return {}
 

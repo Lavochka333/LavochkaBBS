@@ -20,6 +20,10 @@ from .const import (
 )
 from .control import ControlSender
 
+# Newest scrcpy server that still speaks the host-initiated tunnel this client
+# implements. 3.x reverses the tunnel direction and needs a different handshake.
+SCRCPY_SERVER_VERSION = "2.7"
+
 
 class Client:
     def __init__(
@@ -92,6 +96,7 @@ class Client:
         self.last_frame: Optional[np.ndarray] = None
         self.resolution: Optional[Tuple[int, int]] = None
         self.device_name: Optional[str] = None
+        self.codec_name: str = "h264"
         self.control = ControlSender(self)
 
         # Need to destroy
@@ -134,9 +139,28 @@ class Client:
         if not len(self.device_name):
             raise ConnectionError("Did not receive Device Name!")
 
-        res = self.__video_socket.recv(4)
-        self.resolution = struct.unpack(">HH", res)
+        res = self._read_exactly(self.__video_socket, 4)
+        # scrcpy server >= 2.4 sends a 4-byte codec name ("h264"/"h265") here and
+        # then the video size as two big-endian int32 values. Older servers sent
+        # the size directly as two uint16 values. Support both layouts.
+        if all(0x20 <= byte < 0x7F for byte in res):
+            self.codec_name = res.decode("ascii")
+            size = self._read_exactly(self.__video_socket, 8)
+            self.resolution = struct.unpack(">II", size)
+        else:
+            self.codec_name = "h264"
+            self.resolution = struct.unpack(">HH", res)
         self.__video_socket.setblocking(False)
+
+    @staticmethod
+    def _read_exactly(sock, size: int) -> bytes:
+        buffer = b""
+        while len(buffer) < size:
+            chunk = sock.recv(size - len(buffer))
+            if not chunk:
+                raise ConnectionError("Video stream closed while reading the header")
+            buffer += chunk
+        return buffer
 
     def __deploy_server(self) -> None:
         """
@@ -152,7 +176,10 @@ class Client:
             "app_process",
             "/",
             "com.genymobile.scrcpy.Server",
-            "2.4",  # Scrcpy server version
+            # 2.7 is the newest server that still uses the host-initiated tunnel
+            # this client speaks. 2.4 fails to negotiate a video stream on several
+            # Android images (including software-rendered emulators).
+            SCRCPY_SERVER_VERSION,
             "log_level=info",
             f"max_size={self.max_width}",
             f"max_fps={self.max_fps}",

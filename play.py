@@ -8,7 +8,7 @@ import os
 from detect import Detect
 from state_finder import get_state
 from utils import load_toml_as_dict, count_hsv_pixels, load_brawlers_info, interpret_pyla_code, \
-    count_mask_pixels, JOYSTICK_RADIUS, clamp, config_bool, is_safe_ast
+    count_mask_pixels, JOYSTICK_RADIUS, clamp, config_bool, is_safe_ast, resolve_project_path
 
 
 brawl_stars_width, brawl_stars_height = 1920, 1080
@@ -18,6 +18,17 @@ hypercharge_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_coun
 POISON_LOW_HSV = np.array((30, 90, 221), dtype=np.uint8)
 POISON_HIGH_HSV = np.array((57, 114, 235), dtype=np.uint8)
 PLAYER_HIT_CIRCLE_RADIUS = 53
+# Escape directions are screen coordinates, so y grows downwards and 90 degrees
+# is "down the screen". Eight directions is what the joystick can be steered
+# into without a diagonal that slides.
+GAS_ESCAPE_ANGLES = tuple(math.radians(angle) for angle in (0, 45, 90, 135, 180, 225, 270, 315))
+# Patches sampled along one escape corridor. More samples see a narrow gap
+# between two clouds, fewer of them are cheaper but step over it.
+GAS_CORRIDOR_SAMPLES = 5
+# What counts towards the score from the corridor past gas_reach, up to
+# gas_lookahead: a cloud further along the way is worth noticing, but not worth
+# as much as one the player is about to walk into.
+GAS_FAR_FIELD_WEIGHT = 0.5
 
 class Play:
 
@@ -70,6 +81,50 @@ class Play:
             close_tile_detector_model,
             classes=self.tile_detector_model_classes
         ) if self.centered_wall_detection else None
+
+        # Showdown gas is found with a model of its own instead of a colour
+        # window: it is a translucent green cloud lying over grass, dirt and
+        # water, so no hue range separates it from the map. The model also
+        # knows the bushes, so a bush never gets read as a cloud. All of this
+        # is optional - with no model file the bot simply plays as if the
+        # arena had no gas, and nothing else has to know about it.
+        self.gas_model_path = bot_config.get("gas_model", "models/gasDetector.onnx")
+        self.gas_classes = bot_config.get("gas_classes", ["gas", "bush"])
+        self.gas_confidence = float(bot_config.get("gas_confidence", 0.25))
+        self.gas_sensitivity = float(bot_config.get("gas_sensitivity", 0.05))
+        self.gas_reach = float(bot_config.get("gas_reach", 3.0))
+        self.gas_lookahead = float(bot_config.get("gas_lookahead", 4.0))
+        self.gas_detect_interval = float(bot_config.get("gas_detect_interval", 0.2))
+        self.gas_escape_cooldown = float(bot_config.get("gas_escape_cooldown", 0.35))
+        self.gas_area_top = float(bot_config.get("gas_area_top", 0.21))
+        self.gas_area_bottom = float(bot_config.get("gas_area_bottom", 1.0))
+        self.gas_danger_enter = float(bot_config.get("gas_danger_enter", 0.14))
+        self.gas_danger_exit = float(bot_config.get("gas_danger_exit", 0.05))
+        self.gas_centre_bias = float(bot_config.get("gas_centre_bias", 0.06))
+        self.gas_avoidance = config_bool(bot_config.get("gas_avoidance"), True)
+
+        self.Detect_gas = None
+        gas_model_path = resolve_project_path(self.gas_model_path or "")
+        if self.gas_avoidance and self.gas_model_path and os.path.exists(gas_model_path):
+            try:
+                self.Detect_gas = Detect(str(gas_model_path), classes=self.gas_classes)
+            except Exception as error:
+                print(f"Gas model could not be loaded, gas avoidance is off: {error}")
+        if self.Detect_gas is None:
+            print("No gas model loaded, the bot will not look for gas.")
+
+        self.gas_boxes = []
+        self.gas_mask = None
+        self.gas_mask_time = 0.0
+        self.gas_coverage = 0.0
+        self.gas_danger = 0.0
+        self.gas_in_danger = False
+        self.gas_escape_direction = None
+        self.gas_escape_index = None
+        self.gas_escape_time = 0.0
+        self.gas_escapes = 0
+        self.gas_danger_escapes = 0
+        self.gas_player_box = None
 
         self.time_since_walls_checked = 0
         self.time_since_player_last_found = time.time()
@@ -390,6 +445,76 @@ class Play:
         return closest_teammate, closest_distance
 
     def is_there_poison_gas(self, player_data, threshold=7000, area_from_player_checked=1.5):
+        """Gas pixels on each side of the player, as up/down/left/right counts.
+
+        Kept for the playstyles and the debug overlay, so the shape of the
+        answer never changes: a count of gas pixels in the region around the
+        player, or 0 for a side with nothing on it.
+
+        The pixels come from the gas model when one is loaded, because showdown
+        gas is green and translucent and a colour window cannot tell it apart
+        from the grass under it. Without a model the old colour scan is used, so
+        a missing model means "no gas seen" rather than an error.
+        """
+        mask = self.gas_mask
+        if mask is None or self.frame is None or mask.shape[:2] != self.frame.shape[:2]:
+            return self.scan_poison_colour(player_data, threshold, area_from_player_checked)
+
+        return self.collect_gas_sides(
+            lambda x1, y1, x2, y2: count_mask_pixels(mask, x1, y1, x2, y2),
+            player_data,
+            threshold,
+            area_from_player_checked,
+            "Gas model",
+            # The model's mask is dense, so a side only a few hundred pixels
+            # across never reaches the old 7000 pixel gate. A side also counts
+            # as gassed once a real share of it is covered, which keeps the
+            # number the playstyles compare meaningful at any resolution.
+            min_share=self.gas_sensitivity
+        )
+
+    def scan_poison_colour(self, player_data, threshold=7000, area_from_player_checked=1.5):
+        """Colour scan for gas, kept for a setup without a gas model.
+
+        The gas in the game is green, not violet, so this window mostly matches
+        the map; it is only the fallback now that the model does the work.
+        """
+        frame = self.frame
+        if frame is None:
+            return {"up": 0, "down": 0, "left": 0, "right": 0}
+
+        def count_colour(x1, y1, x2, y2):
+            roi = frame[y1:y2, x1:x2]
+            if roi.size == 0:
+                return 0
+            hsv_roi = cv2.cvtColor(roi, cv2.COLOR_RGB2HSV)
+            return count_mask_pixels(
+                cv2.inRange(hsv_roi, POISON_LOW_HSV, POISON_HIGH_HSV),
+                0, 0, roi.shape[1], roi.shape[0]
+            )
+
+        return self.collect_gas_sides(
+            count_colour,
+            player_data,
+            threshold,
+            area_from_player_checked,
+            "Poison"
+        )
+
+    def collect_gas_sides(self, counter, player_data, threshold, area_from_player_checked, label, min_share=None):
+        """Split the area around the player into four sides and count gas.
+
+        `counter` is handed frame coordinates and answers with the number of gas
+        pixels in that rectangle, which lets the model mask and the colour scan
+        share everything except how they find the gas themselves. A side is
+        reported when it passes the pixel `threshold`, or - if `min_share` is
+        given - when that much of it is covered.
+        """
+        empty = {"up": 0, "down": 0, "left": 0, "right": 0}
+
+        if not player_data or len(player_data) < 4 or self.frame is None:
+            return empty
+
         actual_player_box = self.get_actual_player_box(player_data) or player_data
         px1, py1, px2, py2 = actual_player_box
         player_width = max(px2 - px1, 1)
@@ -400,40 +525,41 @@ class Play:
         max_y = int(min(py2 + player_height*area_from_player_checked, self.window_controller.height))
 
         if min_x >= max_x or min_y >= max_y:
-            return {
-                "up": 0,
-                "down": 0,
-                "left": 0,
-                "right": 0,
-            }
+            return empty
 
-        roi = self.frame[min_y:max_y, min_x:max_x]
-        hsv_roi = cv2.cvtColor(roi, cv2.COLOR_RGB2HSV)
-
-        mask = cv2.inRange(hsv_roi, POISON_LOW_HSV, POISON_HIGH_HSV)
         x, y = self.get_entity_pos(actual_player_box)
         roi_w = int(max_x - min_x)
         roi_h = int(max_y - min_y)
         local_px = int(clamp(x - min_x, 0, roi_w))
         local_py = int(clamp(y - min_y, 0, roi_h))
 
-        counts = {
-            "up": count_mask_pixels(mask, 0, 0, roi_w, local_py),
-            "down": count_mask_pixels(mask, 0, local_py, roi_w, roi_h),
-            "left": count_mask_pixels(mask, 0, 0, local_px, roi_h),
-            "right": count_mask_pixels(mask, local_px, 0, roi_w, roi_h),
+        areas = {
+            "up": roi_w * local_py,
+            "down": roi_w * (roi_h - local_py),
+            "left": local_px * roi_h,
+            "right": (roi_w - local_px) * roi_h,
         }
 
-        result = {
-            direction: count if count > threshold else 0
-            for direction, count in counts.items()
+        counts = {
+            "up": counter(min_x, min_y, max_x, min_y + local_py),
+            "down": counter(min_x, min_y + local_py, max_x, max_y),
+            "left": counter(min_x, min_y, min_x + local_px, max_y),
+            "right": counter(min_x + local_px, min_y, max_x, max_y),
         }
+
+        result = {}
+        for direction, count in counts.items():
+            gassed = count > threshold
+            if not gassed and min_share is not None and areas[direction] > 0:
+                gassed = count / areas[direction] > min_share
+            result[direction] = count if gassed else 0
 
         if self.verbose_debug:
-            print("Poison gas pixels:", counts)
+            print(f"{label} gas pixels:", counts)
 
             ts = int(time.time())
 
+            roi = self.frame[min_y:max_y, min_x:max_x]
             debug_regions = {
                 "up": roi[0:local_py, 0:roi_w],
                 "down": roi[local_py:roi_h, 0:roi_w],
@@ -449,6 +575,363 @@ class Play:
                     )
 
         return result
+
+    def detect_gas(self, image):
+        """Run the gas model over a frame and keep the clouds it found.
+
+        Fills `gas_boxes` with the clouds inside the play area and `gas_mask`
+        with their union. The whole frame goes to the model on purpose: the
+        model brings its own clouds, so there is no pixel count to threshold and
+        nothing at all to keep when the arena is clean.
+
+        The model also flags the dark tree band above the arena, so clouds whose
+        middle sits above `gas_area_top` (or below `gas_area_bottom`) are
+        dropped. Cutting that band took 20 false clouds on the trees down to 0.
+        """
+        self.gas_boxes = []
+        self.gas_mask = None
+        self.gas_mask_time = time.time()
+
+        if self.Detect_gas is None or image is None or getattr(image, "size", 0) == 0:
+            return self.gas_boxes
+
+        try:
+            detections = self.Detect_gas.detect_objects(image, conf_tresh=self.gas_confidence)
+        except Exception as error:
+            print(f"Gas detection failed: {error}")
+            return self.gas_boxes
+
+        height = image.shape[0]
+        top_limit = self.gas_area_top * height
+        bottom_limit = self.gas_area_bottom * height
+
+        boxes = []
+        for box in (detections or {}).get("gas", []):
+            if not box or len(box) < 4:
+                continue
+            x1, y1, x2, y2 = [float(value) for value in box[:4]]
+            middle = (y1 + y2) / 2
+            if middle < top_limit or middle > bottom_limit:
+                continue
+            boxes.append([int(x1), int(y1), int(x2), int(y2)])
+
+        self.gas_boxes = boxes
+        self.gas_mask = self.build_gas_mask(image, boxes)
+
+        return self.gas_boxes
+
+    @staticmethod
+    def build_gas_mask(image, boxes):
+        """Flatten gas boxes into one 0/255 mask the size of the frame."""
+        height, width = image.shape[:2]
+        mask = np.zeros((height, width), dtype=np.uint8)
+
+        for box in boxes or []:
+            # Each pair is clamped and put in order on its own: sorting all four
+            # together would mix the x and the y of a box into a different one.
+            x1, y1, x2, y2 = [int(value) for value in box[:4]]
+            x1, x2 = sorted((max(0, x1), min(width, x2)))
+            y1, y2 = sorted((max(0, y1), min(height, y2)))
+            if x2 <= x1 or y2 <= y1:
+                continue
+            mask[y1:y2, x1:x2] = 255
+
+        return mask
+
+    def gas_mask_is_usable(self, image):
+        """True when the mask in hand belongs to this frame."""
+        if self.gas_mask is None or image is None or getattr(image, "ndim", 0) < 2:
+            return False
+        return self.gas_mask.shape[:2] == image.shape[:2]
+
+    def gas_share_on_player(self, mask, player_box):
+        """Share of the player's body (0..1) that the gas mask covers."""
+        if mask is None or not player_box or len(player_box) < 4:
+            return 0.0
+
+        box = self.get_actual_player_box(player_box) or player_box
+        x1, y1, x2, y2 = [float(value) for value in box[:4]]
+        height, width = mask.shape[:2]
+        # Rounded before the area is taken: the pixel counter works on whole
+        # pixels, so measuring a fractional box would report over 1.0.
+        x1 = int(clamp(x1, 0, width))
+        x2 = int(clamp(x2, 0, width))
+        y1 = int(clamp(y1, 0, height))
+        y2 = int(clamp(y2, 0, height))
+
+        area = (x2 - x1) * (y2 - y1)
+        if area <= 0:
+            return 0.0
+
+        return min(1.0, count_mask_pixels(mask, x1, y1, x2, y2) / area)
+
+    def gas_on_player(self, image, player_box):
+        """Share of the player standing in gas, stored in `gas_coverage`.
+
+        This is the number the danger latch and the panel both read. With no
+        model, no mask or no player to measure there is nothing to cover, so the
+        answer is 0.
+        """
+        self.refresh_gas(image, player_box)
+        return self.gas_coverage
+
+    def refresh_gas(self, image, player_box=None, force=False):
+        """Bring the gas state of this frame up to date.
+
+        The model is the expensive half, so it only runs once every
+        `gas_detect_interval` seconds. The cheap half - how much of the player
+        the mask covers, and whether that counts as standing in gas - is worked
+        out from the mask that is already there on every call, so the reading is
+        never half a second behind the joystick.
+        """
+        now = time.time()
+
+        if self.Detect_gas is None or image is None or getattr(image, "size", 0) == 0:
+            self.clear_gas_state()
+            return
+
+        if player_box and len(player_box) >= 4:
+            self.gas_player_box = [float(value) for value in player_box[:4]]
+
+        if force or not self.gas_mask_is_usable(image) or now - self.gas_mask_time >= self.gas_detect_interval:
+            self.detect_gas(image)
+
+        if self.gas_player_box and self.gas_mask is not None:
+            self.gas_coverage = self.gas_share_on_player(self.gas_mask, self.gas_player_box)
+        else:
+            self.gas_coverage = 0.0
+
+        self.update_gas_danger(self.gas_coverage)
+
+        if self.verbose_debug:
+            print(
+                f"Gas: {len(self.gas_boxes)} cloud(s), "
+                f"coverage {self.gas_coverage:.3f}, danger {self.gas_danger:.3f}"
+            )
+
+    def clear_gas_state(self):
+        """Forget the gas reading, for when there is nothing to measure.
+
+        Called when the player cannot be found: a coverage from a player that
+        is no longer on screen would keep the panel showing danger forever.
+        """
+        self.gas_boxes = []
+        self.gas_mask = None
+        self.gas_player_box = None
+        self.gas_coverage = 0.0
+        self.gas_escape_direction = None
+        self.gas_escape_index = None
+        self.update_gas_danger(0.0)
+
+    def update_gas_danger(self, coverage):
+        """Latch "the player is standing in gas" with hysteresis.
+
+        Showdown gas comes as scattered patches, so running on the first sign of
+        it made the bot thrash and never fight. The flight starts once
+        `gas_danger_enter` of the body is covered and only ends after the share
+        drops back to `gas_danger_exit`, so the edge of a patch no longer flips
+        the bot back and forth.
+        """
+        if self.gas_in_danger:
+            self.gas_in_danger = coverage > self.gas_danger_exit
+        else:
+            self.gas_in_danger = coverage > self.gas_danger_enter
+
+        self.gas_danger = coverage if self.gas_in_danger else 0.0
+        return self.gas_in_danger
+
+    def is_in_gas(self):
+        """True while the player is standing in gas, hysteresis latch included."""
+        return bool(self.gas_in_danger)
+
+    def map_centre(self, image=None):
+        """Middle of the arena, in the coordinates the boxes are in."""
+        if image is not None and getattr(image, "ndim", 0) >= 2:
+            height, width = image.shape[:2]
+            return width / 2, height / 2
+        width = self.window_controller.width or brawl_stars_width
+        height = self.window_controller.height or brawl_stars_height
+        return width / 2, height / 2
+
+    def gas_direction_share(self, mask, x, y, player_width, player_height, direction_x, direction_y, reach, start=0.0):
+        """Gas share inside the corridor the player would walk down.
+
+        The corridor starts at the edge of the body and runs `reach` player
+        widths out, sampled in a few patches so a narrow gap between two clouds
+        still shows up. `start` is the share of it to leave out, which is how
+        the far end of the corridor is measured on its own. Samples outside the
+        frame are dropped and the rest is averaged, so a direction that runs off
+        the side of the screen is not punished for the part that was never on it.
+        """
+        if mask is None or reach <= 0:
+            return 0.0
+
+        height, width = mask.shape[:2]
+        body = max(player_width, player_height) / 2
+        start_x = x + direction_x * body
+        start_y = y + direction_y * body
+        reach_x = player_width * reach
+        reach_y = player_height * reach
+        patch = body * 0.6
+
+        gas_pixels = 0
+        measured = 0
+
+        for step in range(GAS_CORRIDOR_SAMPLES):
+            along = start + (step + 0.5) / GAS_CORRIDOR_SAMPLES * (1.0 - start)
+            sample_x = start_x + direction_x * reach_x * along
+            sample_y = start_y + direction_y * reach_y * along
+            x1 = clamp(sample_x - patch / 2, 0, width)
+            x2 = clamp(sample_x + patch / 2, 0, width)
+            y1 = clamp(sample_y - patch / 2, 0, height)
+            y2 = clamp(sample_y + patch / 2, 0, height)
+            if x1 >= x2 or y1 >= y2:
+                continue
+            measured += (x2 - x1) * (y2 - y1)
+            gas_pixels += count_mask_pixels(mask, x1, y1, x2, y2)
+
+        if measured <= 0:
+            return 0.0
+
+        return gas_pixels / measured
+
+    @staticmethod
+    def gas_direction_index(direction):
+        """Which of the eight escape directions a vector points at."""
+        if not direction:
+            return None
+        angle = math.atan2(direction[1], direction[0])
+        return int(round(angle / (math.pi / 4))) % len(GAS_ESCAPE_ANGLES)
+
+    def _clearest_escape(self, mask, player_box, walls=None):
+        """The least gassy of the eight directions around the player.
+
+        Every direction is scored by the gas share of the corridor it walks
+        down, minus a bonus for pointing back at the middle of the map: showdown
+        gas does more damage the further out the player is, so a clean step
+        inwards beats an equally clean step sideways. Shares under
+        `gas_sensitivity` count as clean, which lets that bonus decide between
+        two sides instead of a few stray pixels. A side the player cannot walk
+        into because of a wall is pushed to the back of the queue.
+
+        Returns a unit (x, y) vector in screen coordinates, or None when there is
+        nothing to measure.
+        """
+        if mask is None or not player_box or len(player_box) < 4:
+            return None
+
+        box = self.get_actual_player_box(player_box) or player_box
+        player_width = max(box[2] - box[0], 1)
+        player_height = max(box[3] - box[1], 1)
+        centre_x, centre_y = self.get_entity_pos(box)
+
+        centre = self.map_centre()
+        to_centre_x = centre[0] - centre_x
+        to_centre_y = centre[1] - centre_y
+        distance_to_centre = math.hypot(to_centre_x, to_centre_y)
+        if distance_to_centre > 0:
+            to_centre_x /= distance_to_centre
+            to_centre_y /= distance_to_centre
+        else:
+            to_centre_x, to_centre_y = 0.0, 0.0
+
+        best_direction = None
+        best_score = None
+        far_start = self.gas_reach / self.gas_lookahead if self.gas_lookahead > 0 else 0.0
+
+        for angle in GAS_ESCAPE_ANGLES:
+            direction_x = math.cos(angle)
+            direction_y = math.sin(angle)
+            # Two bands: the ground under the next `gas_reach` player widths,
+            # and everything up to `gas_lookahead`, which only gets half the
+            # weight. A side that is clear now but has a cloud waiting at the
+            # end of it is still worse than one that stays clear.
+            share = self.gas_direction_share(
+                mask, centre_x, centre_y, player_width, player_height,
+                direction_x, direction_y, self.gas_reach
+            )
+            if self.gas_lookahead > self.gas_reach:
+                share += GAS_FAR_FIELD_WEIGHT * self.gas_direction_share(
+                    mask, centre_x, centre_y, player_width, player_height,
+                    direction_x, direction_y, self.gas_lookahead, far_start
+                )
+            if share < self.gas_sensitivity:
+                share = 0.0
+            inward = max(0.0, direction_x * to_centre_x + direction_y * to_centre_y)
+            score = share - self.gas_centre_bias * inward
+            if walls and self.is_path_blocked(player_box, (direction_x, direction_y), walls):
+                score += 1.0
+            if best_score is None or score < best_score:
+                best_score = score
+                best_direction = (direction_x, direction_y)
+
+        return best_direction
+
+    def _toward_centre(self, player_box, image=None):
+        """Unit vector from the player to the middle of the arena.
+
+        Gas damage grows with the distance from the centre, so when no side is
+        clear at all, the way inwards is still the way that hurts least.
+        """
+        if not player_box or len(player_box) < 4:
+            return None
+
+        centre_x, centre_y = self.map_centre(image)
+        player_x, player_y = self.get_entity_pos(player_box)
+        dx = centre_x - player_x
+        dy = centre_y - player_y
+        length = math.hypot(dx, dy)
+        if length < 1:
+            return None
+
+        return dx / length, dy / length
+
+    def avoid_gas(self, image=None, player_box=None, walls=None, current_time=None):
+        """Movement that walks the player out of the gas, or None for none.
+
+        A direction is only picked while the player is actually in gas (see
+        `update_gas_danger`); the rest of the time this returns None and the
+        playstyle's own movement is used untouched. Inside a cloud the eight
+        directions are scored as in `_clearest_escape`, and the winner is held
+        for `gas_escape_cooldown` so the joystick is not rubbed between two
+        neighbouring directions every frame.
+        """
+        if image is None:
+            image = self.frame
+        if player_box is None:
+            player_box = self.gas_player_box
+        if current_time is None:
+            current_time = time.time()
+
+        self.refresh_gas(image, player_box)
+
+        if not self.gas_in_danger:
+            self.gas_escape_direction = None
+            self.gas_escape_index = None
+            return None
+
+        direction = self._clearest_escape(self.gas_mask, player_box, walls)
+        if direction is None:
+            direction = self._toward_centre(player_box, image)
+        if direction is None:
+            return None
+
+        index = self.gas_direction_index(direction)
+        previous = self.gas_escape_direction
+
+        if previous is not None and index != self.gas_escape_index and \
+                current_time - self.gas_escape_time < self.gas_escape_cooldown:
+            return previous
+
+        if previous is None or index != self.gas_escape_index:
+            self.gas_escape_index = index
+            self.gas_escape_time = current_time
+            self.gas_escapes += 1
+            if self.gas_in_danger:
+                self.gas_danger_escapes += 1
+
+        self.gas_escape_direction = direction
+        return direction
 
     def get_main_data(self, frame):
         data = self.Detect_main_info.detect_objects(frame, conf_tresh=self.entity_detection_confidence)
@@ -534,7 +1017,7 @@ class Play:
         target_y = y * scale * self.window_controller.height_ratio
         return target_x, target_y
 
-    def loop(self, brawler, data, current_time):
+    def loop(self, brawler, data, current_time, gas_movement=None):
         self.context = {
                 'player_data': data['player'][0],
                 'enemy_data': data['enemy'],
@@ -567,6 +1050,11 @@ class Play:
                 'find_closest_enemy': self.find_closest_enemy,
                 'find_closest_teammate': self.find_closest_teammate,
                 'is_there_poison_gas': self.is_there_poison_gas,
+                'avoid_gas': self.avoid_gas,
+                'is_in_gas': self.is_in_gas,
+                'gas_coverage': self.gas_coverage,
+                'gas_danger': self.gas_danger,
+                'gas_boxes': self.gas_boxes,
                 'is_path_blocked': self.is_path_blocked,
                 'is_enemy_hittable': self.is_enemy_hittable,
                 'time': time,
@@ -581,21 +1069,31 @@ class Play:
             }
         movement = self.get_movement()
         movement_vector = self.movement_to_vector(movement)
-        if movement_vector is None:
+        gas_vector = self.movement_to_vector(gas_movement)
+        if movement_vector is None and gas_vector is None:
             self.window_controller.release_movement()
             self.last_movement = ''
             return None
-        movement = self.clamp_movement(movement_vector)
+        # Standing in a cloud is worth leaving whatever the playstyle wanted, so
+        # the escape takes the joystick. The unstick further down still gets the
+        # last word: being wedged into a wall is worse than both.
+        movement = self.clamp_movement(gas_vector if gas_vector is not None else movement_vector)
         current_time = time.time()
-        if movement != self.last_movement:
-            if current_time - self.last_movement_change_time >= self.minimum_movement_delay:
-                self.last_movement = movement
-                self.last_movement_change_time = current_time
+        if gas_vector is None:
+            if movement != self.last_movement:
+                if current_time - self.last_movement_change_time >= self.minimum_movement_delay:
+                    self.last_movement = movement
+                    self.last_movement_change_time = current_time
+                else:
+                    movement = self.last_movement
             else:
-                movement = self.last_movement
-        else:
-            self.last_movement_change_time = current_time
+                self.last_movement_change_time = current_time
         movement = self.unstuck_movement_if_needed(movement, current_time)
+        if gas_vector is not None:
+            # The joystick is already on the escape line, so the movement delay
+            # must not be allowed to hand back the direction it just left.
+            self.last_movement = movement
+            self.last_movement_change_time = current_time
         return movement
 
     def check_if_hypercharge_ready(self, frame):
@@ -773,6 +1271,9 @@ class Play:
                 data = None
 
         if not data:
+            # No player to measure, so the last gas reading would be about a
+            # brawler that is no longer on screen.
+            self.clear_gas_state()
             if current_time - self.time_since_player_last_found > 1.0:
                 self.window_controller.release_movement()
             if current_time - self.time_since_last_proceeding > self.no_detection_proceed_delay:
@@ -798,7 +1299,11 @@ class Play:
             self.is_super_ready = self.check_if_super_ready(frame)
             self.time_since_super_checked = current_time
         self.frame = frame
-        movement = self.loop(brawler, data, current_time)
+        # Gas is read before the playstyle runs, so the escape it hands over is
+        # already known when the playstyle asks what to do.
+        player_box = data['player'][0] if data.get('player') else None
+        gas_movement = self.avoid_gas(frame, player_box, data.get('wall') or [], current_time)
+        movement = self.loop(brawler, data, current_time, gas_movement)
         self.publish_debug_view(frame, data, state, movement)
         if movement is not None:
             self.do_movement(movement)
