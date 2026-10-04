@@ -42,6 +42,7 @@ class StageManager:
         self._last_switch = None
         # The lobby counters are read once per visit, not on every tick: the
         # read is OCR and the lobby is reported several times a second.
+        self._end_result_recorded = False
         self._lobby_synced = False
         self.Lobby_automation = lobby_automator
         self.lobby_config = load_toml_as_dict("./cfg/lobby_config.toml")
@@ -561,7 +562,8 @@ class StageManager:
         self._star_drop_thread.start()
 
     def end_game(self):
-        screenshot = self.window_controller.screenshot()
+        from lobby_automation import selection_snapshot
+        screenshot = selection_snapshot(self.window_controller)
 
         current_state = get_state(screenshot)
         button_pressed = False
@@ -569,7 +571,9 @@ class StageManager:
         parsed_result = None
         while current_state.startswith("end") and time.time() - end_screen_time < 35:
 
-            if time.time() - self.time_since_last_stat_change > 25 and parsed_result is None :
+            if self._should_stop():
+                return
+            if parsed_result is None and not self._end_result_recorded:
                 raw_found_result = '_'.join(current_state.split("_")[1:])
                 parsed_result = self.Trophy_observer.parse_game_result(raw_found_result)
 
@@ -580,6 +584,7 @@ class StageManager:
                     print("Underdog detected for this match.")
                 self.Trophy_observer.add_trophies(parsed_result, current_brawler, self.playstyle_info, underdog, power_level)
                 self.Trophy_observer.add_win(parsed_result)
+                self._end_result_recorded = True
                 self.time_since_last_stat_change = time.time()
                 values = {
                     "trophies": self.Trophy_observer.current_trophies,
@@ -598,8 +603,9 @@ class StageManager:
                 print("Game has ended, proceeding")
                 self.window_controller.press("proceed")
 
-            time.sleep(3)
-            screenshot = self.window_controller.screenshot()
+            if self._sleep_interruptible(.4):
+                return
+            screenshot = selection_snapshot(self.window_controller)
             current_state = get_state(screenshot)
 
         if self.play_again_on_win and parsed_result and parsed_result.result == MatchResult.VICTORY and not self._should_pause():
@@ -645,6 +651,8 @@ class StageManager:
             self.window_controller.click(*popup_location)
 
     def do_state(self, state, data=None):
+        if state == "match":
+            self._end_result_recorded = False
         action = self.states.get(state)
         if action is None:
             return

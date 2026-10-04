@@ -79,6 +79,32 @@ showdown_place_templates = {
     3: ["4th.png"]
 }
 
+_rank_read_times = {}
+
+
+def read_solo_result(image):
+    """Solo ranks 5–10 have no bundled result templates."""
+    h, w = image.shape[:2]
+    now = time.monotonic()
+    if now - _rank_read_times.get((w, h), 0) < .7:
+        return False
+    _rank_read_times[(w, h)] = now
+    import trophy_reader
+    if not trophy_reader.available():
+        return False
+    import re
+    import pytesseract
+    crop = image[:int(h*.19), :int(w*.36)]
+    grey = cv2.resize(cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY), None, fx=2, fy=2)
+    try:
+        text = pytesseract.image_to_string(grey, lang='eng+rus', config='--psm 6')
+    except (pytesseract.TesseractError, UnicodeDecodeError):
+        return False
+    rank = re.search(r'(?:rank|место)\s*[:#]?\s*(10|[1-9])\b', text, re.IGNORECASE)
+    if rank:
+        return 'defeat' if int(rank[1]) >= 5 else 'victory'
+    return False
+
 def find_game_result(screenshot):
     for place, template_files in showdown_place_templates.items():
         for template_file in template_files:
@@ -100,7 +126,7 @@ def find_game_result(screenshot):
     is_draw = is_template_in_region(screenshot, end_results_path + 'draw.png', match_result_crop_region)
     if is_draw:
         return "draw"
-    return False
+    return read_solo_result(screenshot)
 
 
 def get_in_game_state(image):

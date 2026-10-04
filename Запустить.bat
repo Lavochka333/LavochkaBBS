@@ -2,6 +2,11 @@
 setlocal
 cd /d "%~dp0"
 
+if exist "dist\quickexit\xlamBOT\xlamBOT.exe" (
+    start "" "dist\quickexit\xlamBOT\xlamBOT.exe"
+    exit /b 0
+)
+
 if exist "dist\counters\xlamBOT\xlamBOT.exe" (
     start "" "dist\counters\xlamBOT\xlamBOT.exe"
     exit /b 0
