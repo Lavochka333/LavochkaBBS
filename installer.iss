@@ -57,6 +57,20 @@ Name: "{group}\Удалить {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: quicklaunchicon
 
+[InstallDelete]
+; Программа пишвает историю матчей и профили устройств рядом с собой, поэтому
+; после переустановки они переживают её и новый запуск подхватывает чужие
+; данные. Удаляем перед установкой.
+Type: files; Name: "{app}\_internal\cfg\match_history*.csv"
+Type: files; Name: "{app}\_internal\cfg\cfg.zip"
+Type: filesandordirs; Name: "{app}\_internal\devices"
+
+[UninstallDelete]
+; И то же самое при удалении, иначе личные файлы остаются на диске.
+Type: files; Name: "{app}\_internal\cfg\match_history*.csv"
+Type: files; Name: "{app}\_internal\cfg\cfg.zip"
+Type: filesandordirs; Name: "{app}\_internal\devices"
+
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "Запустить {#AppName}"; Flags: nowait postinstall skipifsilent
 

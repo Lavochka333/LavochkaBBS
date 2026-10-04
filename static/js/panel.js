@@ -223,7 +223,7 @@
                     <div class="rotate-field">
                         <label class="rotate-label" for="sort-mode-${escapeHtml(key)}">Сортировка</label>
                         <select id="sort-mode-${escapeHtml(key)}" class="input rotate-select"
-                                data-sort-mode="${escapeHtml(key)}"></select>
+                                data-sort-mode="${escapeHtml(key)}">${SORT_MODE_OPTIONS}</select>
                     </div>
                     <button class="btn btn-sm btn-primary" type="button"
                             data-action="save-rotate" data-key="${escapeHtml(key)}">Применить</button>
@@ -279,9 +279,37 @@
                 if (queues[d.key]) renderQueue(d.key, queues[d.key], liveByKey[d.key]);
                 else loadQueue(d.key);
                 if (lastLogText[d.key]) renderLogs(d.key, lastLogText[d.key]);
+                applyStoredRotation(d.key);
             });
         }
         devices.forEach(updateCard);
+    }
+
+    /* Квота и сортировка хранятся в настройках устройства, а не в телеметрии.
+       Раньше поля заполнялись только из телеметрии, поэтому у остановленного
+       или упавшего бота «Смена» была пустой, а список сортировки - вовсе без
+       вариантов. Настройки читаются независимо от состояния бота, так что
+       поля показывают сохранённые значения всегда. */
+    async function applyStoredRotation(key) {
+        let settings = {};
+        try {
+            const { data } = await api(
+                `/api/devices/${encodeURIComponent(key)}/settings`);
+            settings = (data && data.settings) || {};
+        } catch (err) {
+            return;
+        }
+        const bot = settings.bot_config || {};
+        const input = grid.querySelector(`[data-switch-input="${cssEscape(key)}"]`);
+        if (input && document.activeElement !== input && bot.brawler_switch_after_games != null) {
+            input.value = bot.brawler_switch_after_games;
+            input.dataset.applied = String(bot.brawler_switch_after_games);
+        }
+        const select = grid.querySelector(`[data-sort-mode="${cssEscape(key)}"]`);
+        if (select && document.activeElement !== select && bot.brawler_pick_mode) {
+            select.value = bot.brawler_pick_mode;
+            select.dataset.applied = bot.brawler_pick_mode;
+        }
     }
 
     function updateCard(device) {
@@ -374,6 +402,14 @@
         { value: 'most_trophies', label: 'По максимальным трофеям' },
         { value: 'by_name', label: 'По имени' },
     ];
+
+    // Варианты сортировки печатаем прямо в разметке карточки. Раньше они
+    // добавлялись в renderTelemetry, и пока телеметрия не приходила, список
+    // оставался пустым: у человека с упавшим ботом поле выглядело как
+    // «сортировки нет», хотя сортировка настроена и работает.
+    const SORT_MODE_OPTIONS = SORT_MODES
+        .map((mode) => `<option value="${escapeHtml(mode.value)}">${escapeHtml(mode.label)}</option>`)
+        .join('');
 
     function renderTelemetry(key, telemetry) {
         const live = { brawler: telemetry.brawler, trophies: telemetry.trophies };

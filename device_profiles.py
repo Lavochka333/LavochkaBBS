@@ -130,8 +130,7 @@ def read_profile_meta(key: str) -> dict[str, Any]:
     """Free-form notes about a device, stored beside its config."""
     path = profile_dir(key) / "profile.json"
     try:
-        with path.open("r", encoding="utf-8") as handle:
-            data = json.load(handle)
+        data = json.loads(utils.read_text_auto(path))
         return data if isinstance(data, dict) else {}
     except Exception:  # noqa: BLE001
         return {}

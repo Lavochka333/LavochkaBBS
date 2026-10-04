@@ -144,8 +144,7 @@ def load_toml_as_dict(file_path, cache=True):
     if str(full_path) in cached_toml and cache:
         return cached_toml[str(full_path)]
     try:
-        with open(full_path, 'r', encoding='utf-8') as f:
-            data = toml.load(f)
+        data = toml.loads(read_text_auto(full_path))
     except Exception as e:
         print(f"Error loading {full_path}: {e}")
         return {}
@@ -155,8 +154,7 @@ def load_toml_as_dict(file_path, cache=True):
     repo_path = PROJECT_ROOT.joinpath(str(file_path).lstrip('/\\'))
     if str(repo_path) != str(full_path) and repo_path.exists():
         try:
-            with open(repo_path, 'r', encoding='utf-8') as f:
-                data = _merge_over(toml.load(f), data)
+            data = _merge_over(toml.loads(read_text_auto(repo_path)), data)
         except Exception as e:  # noqa: BLE001
             print(f"Error merging {repo_path} under {full_path}: {e}")
     cached_toml[str(full_path)] = data
@@ -249,6 +247,25 @@ def account_state_path() -> Path:
     return resolve_project_path("account_state.json")
 
 
+def read_text_auto(path, errors="replace"):
+    """Прочитать текст, не падая на чужой кодировке.
+
+    Панель и бот читают конфиги, плейстайлы и очередь как utf-8. Файл, сохранённый
+    в блокноте на русской Windows, приходит в cp1251, и чтение падало с
+    'utf-8' codec can't decode byte ... - панель при этом показывала одни
+    прочерки, а бот падал в last_error. Пробуем utf-8, затем cp1251, и если не
+    подошёл ни один - читаем с заменой символов, потому что частично верный
+    текст полезнее пустоты.
+    """
+    raw = Path(path).read_bytes()
+    for encoding in ("utf-8", "cp1251"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors=errors)
+
+
 def save_brawler_data(data):
     """
     Save the given data to a json file. As a list of dictionaries.
@@ -263,8 +280,7 @@ def load_brawler_data():
     if not queue_path.exists():
         return []
     try:
-        with open(queue_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        data = json.loads(read_text_auto(queue_path))
         return clean_queue(data) if isinstance(data, list) else []
     except Exception as e:
         traceback.print_exc()
@@ -855,10 +871,11 @@ def interpret_playstyle_code(playstyle_code, context):
 def load_playstyle_script(filename):
     try:
         script_path = resolve_playstyle_path(filename)
-        with open(script_path, 'r', encoding='utf-8') as file:
-            metadata_header = file.readline().strip()
-            metadata = json.loads(metadata_header) if metadata_header else {}
-            playstyle_source = file.read()
+        text = read_text_auto(script_path)
+        lines = text.splitlines(True)
+        metadata_header = lines[0].strip() if lines else ""
+        metadata = json.loads(metadata_header) if metadata_header else {}
+        playstyle_source = text
         return metadata, playstyle_source
     except FileNotFoundError:
         print(f"Error: The playstyle file '{filename}' was not found.")

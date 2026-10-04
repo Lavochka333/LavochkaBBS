@@ -109,12 +109,18 @@ function Build-App {
     if (-not (Test-Path $table)) {
         throw 'В сборке нет cfg/brawlers_info.json - бот не будет знать бойцов'
     }
-    $known = @(Get-Content $table -Raw -Encoding UTF8 | ConvertFrom-Json |
-        ForEach-Object { $_.PSObject.Properties.Name }).Length
-    $unknown = @($parsed | Where-Object { $known -notcontains $_.brawler }).Count
-    Write-Host "  таблица бойцов: $known, неизвестных имён в очереди: $unknown" -ForegroundColor Green
-    if ($unknown -gt 0) {
-        throw "В очереди $unknown имён, которых нет в таблице бойцов"
+    # Имена бойцов достаём в список и только потом считаем: @(...).Length даёт
+    # число, а не сам список, и -notcontains потом сравнивал число со строкой,
+    # объявляя неизвестными все бойцы подряд.
+    $known = @((Get-Content $table -Raw -Encoding UTF8 | ConvertFrom-Json).PSObject.Properties.Name)
+    if ($known.Count -lt 50) {
+        throw "Таблица бойцов выглядит пустой: $($known.Count) имён"
+    }
+    $unknown = @($parsed | Where-Object { $known -notcontains $_.brawler })
+    Write-Host "  таблица бойцов: $($known.Count), неизвестных имён в очереди: $($unknown.Count)" -ForegroundColor Green
+    if ($unknown.Count -gt 0) {
+        $names = ($unknown | Select-Object -First 5 | ForEach-Object { $_.brawler }) -join ', '
+        throw "В очереди $($unknown.Count) имён, которых нет в таблице бойцов: $names"
     }
 
     # Личные файлы в сборку попадать не должны.
