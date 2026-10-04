@@ -81,13 +81,23 @@ NAME_OCR_LOOSE_CONFIG = "--psm 7"
 # neighbouring "trophies to next prestige" number - and why it now reads nothing
 # at all. Keep the neighbours as fallbacks: the bar carries several numbers and
 # which one is under the edge changes as the layout shifts.
-ACCOUNT_TOTAL_REGION = (436, 38, 96, 34)
+# This build of the game has no gold bar under a crown badge. A screenshot of a
+# live 1280x720 lobby shows three separate counters in the top right instead:
+# a purple one, a blue one and a green one. The old region at x 436-532 sat on
+# the blue reward boxes on the left of that strip, which is why it read 7568
+# (the neighbouring "trophies to next prestige" figure) and then nothing at all:
+# the two-confirmation rule correctly refused to keep a number that did not
+# repeat. The regions below were measured from that frame, in 1920x1080 terms,
+# and all three now read cleanly: 1881, 29231 and 148.
+#
+# Which of them is the trophy count is settled by watching which one moves with
+# the match history rather than by guessing from the icon, so the widest one
+# goes first and the validator below decides.
+ACCOUNT_TOTAL_REGION = (1341, 8, 255, 60)
 ACCOUNT_TOTAL_REGIONS = (
     ACCOUNT_TOTAL_REGION,
-    (430, 34, 110, 40),
-    (438, 41, 85, 30),
-    (413, 36, 122, 40),
-    (455, 34, 90, 42),
+    (1137, 8, 189, 60),
+    (1621, 8, 99, 60),
 )
 
 
