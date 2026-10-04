@@ -3,7 +3,7 @@ import os
 import secrets
 import time
 import requests
-from utils import load_toml_as_dict, save_dict_as_toml, api_base_url, hash_playstyle, PYLA_VERSION, resolve_project_path
+from utils import load_toml_as_dict, save_dict_as_toml, api_base_url, hash_playstyle, XLAMBOT_VERSION, resolve_project_path
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional
@@ -59,7 +59,7 @@ class TrophyObserver:
     HISTORY_COLUMNS = [
         "date_time", "brawler_name", "result", "current_trophies", "trophy_delta",
         "new_winstreak", "playstyle_hash", "playstyle_name", "playstyle_gamemodes",
-        "playstyle_brawlers", "pyla_version", "power_level",
+        "playstyle_brawlers", "xlambot_version", "power_level",
     ]
     INTEGER_HISTORY_COLUMNS = {
         "current_trophies", "trophy_delta", "new_winstreak", "power_level",
@@ -549,7 +549,7 @@ class TrophyObserver:
             "playstyle_name": info.get("name", ""),
             "playstyle_gamemodes": "|".join(info.get("gamemodes") or []),
             "playstyle_brawlers": "|".join(info.get("brawlers") or []),
-            "pyla_version": PYLA_VERSION,
+            "xlambot_version": XLAMBOT_VERSION,
             "power_level": power_level if power_level is not None else -1,
         })
         self.match_counter += 1

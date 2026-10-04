@@ -95,13 +95,13 @@ def _start_discord_bot_thread(app: Flask):
         discord_thread = threading.Thread(
             target=discord_bot.run_bot,
             daemon=True,
-            name="pyla-discord-bot",
+            name="xlambot-discord-bot",
         )
         app.config["discord_bot_thread"] = discord_thread
         discord_thread.start()
 
 
-def create_app(pyla_main, start_discord_bot=False):
+def create_app(xlambot_main, start_discord_bot=False):
     app = Flask(
         __name__,
         template_folder=str(resolve_project_path("templates")),
@@ -110,11 +110,11 @@ def create_app(pyla_main, start_discord_bot=False):
     app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
     app.config["UI_API_TOKEN"] = secrets.token_urlsafe(32)
 
-    runtime_manager = RuntimeManager(pyla_main)
+    runtime_manager = RuntimeManager(xlambot_main)
     data_service = WebDataService(runtime_manager)
     discord_bot = DiscordBot(runtime_manager, data_service)
     runtime_manager.configure_start_gate(data_service.get_queue_data, data_service.get_auth_state)
-    device_manager = DeviceRuntimeManager(pyla_main, discord_bot)
+    device_manager = DeviceRuntimeManager(xlambot_main, discord_bot)
     device_manager.configure_queue_provider(device_profiles.load_queue)
     app.config["runtime_manager"] = runtime_manager
     app.config["data_service"] = data_service

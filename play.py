@@ -7,7 +7,7 @@ import os
 
 from detect import Detect
 from state_finder import get_state
-from utils import load_toml_as_dict, count_hsv_pixels, load_brawlers_info, interpret_pyla_code, \
+from utils import load_toml_as_dict, count_hsv_pixels, load_brawlers_info, interpret_playstyle_code, \
     count_mask_pixels, JOYSTICK_RADIUS, clamp, config_bool, is_safe_ast, resolve_project_path
 
 
@@ -32,7 +32,7 @@ GAS_FAR_FIELD_WEIGHT = 0.5
 
 class Play:
 
-    def __init__(self, main_info_model, tile_detector_model, close_tile_detector_model, window_controller, pyla_code):
+    def __init__(self, main_info_model, tile_detector_model, close_tile_detector_model, window_controller, playstyle_code):
         bot_config = load_toml_as_dict("cfg/bot_config.toml")
         time_config = load_toml_as_dict("cfg/time_tresholds.toml")
         self.fix_movement_keys = {
@@ -148,15 +148,15 @@ class Play:
         self.entity_detection_confidence = bot_config["entity_detection_confidence"]
         self.seconds_to_hold_attack_after_reaching_max = load_toml_as_dict("cfg/bot_config.toml")["seconds_to_hold_attack_after_reaching_max"]
         self.persistent_data = {"time_since_holding_attack": None}
-        if isinstance(pyla_code, str):
-            is_safe, error_msg = is_safe_ast(pyla_code)
+        if isinstance(playstyle_code, str):
+            is_safe, error_msg = is_safe_ast(playstyle_code)
             if not is_safe:
                 print(f"Security/Syntax Validation Failed for playstyle: {error_msg}")
-                self.pyla_code = compile("", "<string>", "exec")
+                self.playstyle_code = compile("", "<string>", "exec")
             else:
-                self.pyla_code = compile(pyla_code, "<pyla_script>", "exec")
+                self.playstyle_code = compile(playstyle_code, "<playstyle>", "exec")
         else:
-            self.pyla_code = pyla_code
+            self.playstyle_code = playstyle_code
         self.context = None
         self.frame = None
 
@@ -1199,7 +1199,7 @@ class Play:
         return walls, bushes
 
     def get_movement(self):
-        movement, updated_globals = interpret_pyla_code(self.pyla_code, self.context)
+        movement, updated_globals = interpret_playstyle_code(self.playstyle_code, self.context)
         return movement
 
     def publish_debug_view(self, frame, data, state, movement=None):

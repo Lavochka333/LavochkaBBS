@@ -393,7 +393,6 @@ class DiscordBot:
                 "activate_playstyle": "**Premium Only:** Activate a playstyle remotely.",
             }
             message = "**Available commands:**\n" + "\n".join(f"- `{command}`: {description}" for command, description in commands.items())
-            message += "\n\n**Unlock Premium:** Visit https://pyla-ai.angelfirela.dev/premium for additional features and commands."
             await interaction.response.send_message(
                 message,
                 ephemeral=True

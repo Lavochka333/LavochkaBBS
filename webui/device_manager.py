@@ -1,4 +1,4 @@
-"""Multi-device supervisor for the Pyla web panel.
+"""Multi-device supervisor for the xlamBOT web panel.
 
 Holds one runtime (thread + control flags) per ADB device, each running inside its
 own device config scope. Also owns ADB device discovery, per-device queues and
@@ -126,8 +126,8 @@ class DeviceRuntime:
 class DeviceRuntimeManager:
     """Discovers ADB devices and supervises one bot thread per device."""
 
-    def __init__(self, pyla_main=None, discord_bot=None):
-        self.pyla_main = pyla_main
+    def __init__(self, xlambot_main=None, discord_bot=None):
+        self.xlambot_main = xlambot_main
         self.discord_bot = discord_bot
         self._lock = threading.RLock()
         self._runtimes: dict[str, DeviceRuntime] = {}
@@ -418,7 +418,7 @@ class DeviceRuntimeManager:
             runtime._result = None
             runtime._started_at = time.time()
             runtime._thread = threading.Thread(
-                target=_worker, daemon=True, name=f"pyla-device-{key}"
+                target=_worker, daemon=True, name=f"xlambot-device-{key}"
             )
             runtime._thread.start()
         return {"ok": True, "message": f"Starting bot on {serial}."}

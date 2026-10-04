@@ -65,3 +65,15 @@ ver.py
 # личная история матчей: в публичный репозиторий не выкладываем
 cfg/match_history.csv
 
+
+# собранная программа и её промежуточные файлы
+dist/
+build/
+exe_test.out
+exe_test.err
+
+
+# снимки настроек и резервные копии истории: личные данные
+cfg/cfg.zip
+cfg/match_history.corrupt-*.csv
+

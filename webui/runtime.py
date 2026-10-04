@@ -16,7 +16,7 @@ GLOBAL_LOGS_LOCK = threading.Lock()
 class ThreadFilterStream:
     ANSI_CLEAN_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
-    def __init__(self, original_stream, prefix_filter="pyla-", is_stderr=False):
+    def __init__(self, original_stream, prefix_filter="xlambot-", is_stderr=False):
         self.original_stream = original_stream
         self.prefix_filter = prefix_filter
         self.is_stderr = is_stderr
@@ -64,13 +64,13 @@ class ThreadFilterStream:
         return getattr(self.original_stream, name)
 
 
-if not getattr(sys.stdout, "_is_pyla_redirected", False):
-    sys.stdout = ThreadFilterStream(sys.stdout, prefix_filter="pyla-")
-    sys.stdout._is_pyla_redirected = True
+if not getattr(sys.stdout, "_is_xlambot_redirected", False):
+    sys.stdout = ThreadFilterStream(sys.stdout, prefix_filter="xlambot-")
+    sys.stdout._is_xlambot_redirected = True
 
-if not getattr(sys.stderr, "_is_pyla_redirected", False):
-    sys.stderr = ThreadFilterStream(sys.stderr, prefix_filter="pyla-", is_stderr=True)
-    sys.stderr._is_pyla_redirected = True
+if not getattr(sys.stderr, "_is_xlambot_redirected", False):
+    sys.stderr = ThreadFilterStream(sys.stderr, prefix_filter="xlambot-", is_stderr=True)
+    sys.stderr._is_xlambot_redirected = True
 
 
 class RuntimeControl:
@@ -103,8 +103,8 @@ class RuntimeControl:
 
 
 class RuntimeManager:
-    def __init__(self, pyla_main):
-        self.pyla_main = pyla_main
+    def __init__(self, xlambot_main):
+        self.xlambot_main = xlambot_main
         self._thread: threading.Thread | None = None
         self.rt_control: RuntimeControl | None = None
         self._lock = threading.Lock()
@@ -150,8 +150,8 @@ class RuntimeManager:
                     self.rt_control.resume()
                     self._state = "running"
                     self._last_error = ""
-                    return {"ok": True, "message": "Pyla resumed."}
-                return {"ok": False, "message": f"Pyla cannot start while state is {self._state}."}
+                    return {"ok": True, "message": "xlamBOT resumed."}
+                return {"ok": False, "message": f"xlamBOT cannot start while state is {self._state}."}
 
             self.rt_control = RuntimeControl(self._set_state)
             self._state = "running"
@@ -161,10 +161,10 @@ class RuntimeManager:
                 target=self._run_worker,
                 args=(queue_data, self.rt_control, discord_bot),
                 daemon=True,
-                name="pyla-runtime",
+                name="xlambot-runtime",
             )
             self._thread.start()
-            return {"ok": True, "message": "Pyla started."}
+            return {"ok": True, "message": "xlamBOT started."}
 
     def start_current_queue(self, discord_bot) -> dict[str, Any]:
         if not self.queue_provider or not self._auth_provider:
@@ -192,7 +192,7 @@ class RuntimeManager:
 
     def _run_worker(self, queue_data: list[dict[str, Any]], control: RuntimeControl, discord_bot):
         try:
-            self.pyla_main(discord_bot, queue_data, runtime_control=control)
+            self.xlambot_main(discord_bot, queue_data, runtime_control=control)
             with self._lock:
                 if self._state != "error":
                     self._state = "idle"
@@ -204,7 +204,7 @@ class RuntimeManager:
                     self._last_error = ""
                 else:
                     self._state = "error"
-                    self._last_error = f"Pyla exited with code {code}."
+                    self._last_error = f"xlamBOT exited with code {code}."
         except Exception as exc:
             with self._lock:
                 self._state = "error"
@@ -221,17 +221,17 @@ class RuntimeManager:
         with self._lock:
             thread_alive = self._thread.is_alive() if self._thread else False
             if not thread_alive or not self.rt_control:
-                return {"ok": False, "message": "Pyla is not running."}
+                return {"ok": False, "message": "xlamBOT is not running."}
 
             if self._state == "running":
                 self.rt_control.request_pause()
                 self._state = "pausing"
-                return {"ok": True, "message": "Pause requested. Pyla will pause in the lobby."}
+                return {"ok": True, "message": "Pause requested. xlamBOT will pause in the lobby."}
 
             if self._state in {"pausing", "paused"}:
                 return {"ok": True, "message": "Pause already requested."}
 
-            return {"ok": False, "message": f"Pyla cannot pause while state is {self._state}."}
+            return {"ok": False, "message": f"xlamBOT cannot pause while state is {self._state}."}
 
     def stop(self) -> dict[str, Any]:
         with self._lock:
@@ -239,7 +239,7 @@ class RuntimeManager:
             if not thread_alive or not self.rt_control:
                 self._state = "idle"
                 self._session_started_at = None
-                return {"ok": True, "message": "Pyla is already stopped."}
+                return {"ok": True, "message": "xlamBOT is already stopped."}
 
             thread = self._thread
             was_paused = self._state == "paused"
@@ -258,10 +258,10 @@ class RuntimeManager:
                         self._state = "idle"
                         stopped_state = "idle"
                 if stopped_state == "error":
-                    return {"ok": False, "message": self._last_error or "Pyla stopped with an error."}
-                return {"ok": True, "message": "Pyla stopped."}
+                    return {"ok": False, "message": self._last_error or "xlamBOT stopped with an error."}
+                return {"ok": True, "message": "xlamBOT stopped."}
 
-        return {"ok": True, "message": "Stop requested. Pyla is shutting down."}
+        return {"ok": True, "message": "Stop requested. xlamBOT is shutting down."}
 
     def get_logs(self) -> list[str]:
         with GLOBAL_LOGS_LOCK:

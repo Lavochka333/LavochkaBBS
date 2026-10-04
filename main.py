@@ -125,7 +125,7 @@ from play import Play
 from stage_manager import StageManager
 from state_finder import get_state
 from time_management import TimeManagement
-from utils import load_toml_as_dict, current_wall_model_is_latest, api_base_url, load_pyla_script, save_brawler_data, \
+from utils import load_toml_as_dict, current_wall_model_is_latest, api_base_url, load_playstyle_script, save_brawler_data, \
     clean_queue, get_discord_link
 from utils import get_brawler_list, update_missing_brawlers_info, check_version, notify_user, update_wall_model_classes, get_latest_wall_model_file, cprint
 from window_controller import WindowController
@@ -145,10 +145,10 @@ def apply_play_order(queue_data):
     return ordered_data
 
 
-def pyla_main(discord_bot, queue_data, stop_event=None, runtime_control=None):
+def xlambot_main(discord_bot, queue_data, stop_event=None, runtime_control=None):
     class Main:
         def __init__(self):
-            current_playstyle = load_toml_as_dict("cfg/bot_config.toml").get("current_playstyle", "default_up.pyla")
+            current_playstyle = load_toml_as_dict("cfg/bot_config.toml").get("current_playstyle", "default_up.xlambot")
             try:
                 self.max_fps = int(load_toml_as_dict("cfg/general_config.toml")['max_fps'])
             except ValueError:
@@ -164,8 +164,8 @@ def pyla_main(discord_bot, queue_data, stop_event=None, runtime_control=None):
                 raise ValueError("No valid brawler data found. Please add a brawler configuration in the UI before starting the bot.")
             save_brawler_data(data)
             print("Starting with queue data:", data)
-            self.playstyle_info, pyla_code = load_pyla_script(current_playstyle)
-            self.Play = Play(*self.load_models(), self.window_controller, pyla_code)
+            self.playstyle_info, playstyle_code = load_playstyle_script(current_playstyle)
+            self.Play = Play(*self.load_models(), self.window_controller, playstyle_code)
             self.Time_management = TimeManagement()
             self.lobby_automator = LobbyAutomation(self.window_controller)
             self.runtime_control = runtime_control
@@ -260,7 +260,7 @@ def pyla_main(discord_bot, queue_data, stop_event=None, runtime_control=None):
             self.state_checker_thread = threading.Thread(
                 target=self.state_checker_loop,
                 daemon=True,
-                name="pyla-state-checker"
+                name="xlambot-state-checker"
             )
             self.state_checker_thread.start()
 
@@ -309,7 +309,7 @@ def pyla_main(discord_bot, queue_data, stop_event=None, runtime_control=None):
 
             self.window_controller.release_movement()
             self.runtime_control.mark_paused()
-            cprint("Pyla is paused in the lobby. Waiting for Start to resume.", "#AAE5A4")
+            cprint("xlamBOT is paused in the lobby. Waiting for Start to resume.", "#AAE5A4")
 
             while self.should_pause() and not self.should_stop():
                 state = self.get_latest_state()
@@ -500,7 +500,7 @@ def open_browser_later(local_url):
         time.sleep(1.5)
         webbrowser.open(local_url)
 
-    threading.Thread(target=_open, daemon=True, name="pyla-browser-launcher").start()
+    threading.Thread(target=_open, daemon=True, name="xlambot-browser-launcher").start()
 
 def stop_on_window_close(app):
     """Ask a running bot instance to stop when its desktop window closes."""
@@ -544,9 +544,9 @@ if __name__ == "__main__":
     from webui import create_app
 
     port = find_open_port()
-    app = create_app(pyla_main, start_discord_bot=True)
+    app = create_app(xlambot_main, start_discord_bot=True)
     local_url = f"http://127.0.0.1:{port}"
-    print(f"Starting Pyla web UI at {local_url}")
+    print(f"Starting xlamBOT web UI at {local_url}")
     if CONSOLE_HIDDEN:
         print(f"Console output is written to {CONSOLE_LOG_FILE}")
     if CLI_ARGS.interface_mode is not None:

@@ -1,7 +1,7 @@
 # xlamBOT
 
 > [!IMPORTANT]
-> **This is a modified fork of [PylaAI](https://github.com/PylaAI/PylaAI).**
+> **This is a modified fork of [xlamBOT](https://github.com/PylaAI/PylaAI).**
 >
 > The original project is by **ivanyordanovgt**, **AngelFireLA** and **awarzu**
 > and is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/).
@@ -15,12 +15,16 @@
 
 [![CC BY-NC 4.0 License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
 [![Discord](https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white)](https://discord.gg/xUusk3fw4A)
-[![Trello](https://img.shields.io/badge/Trello-0079BF?logo=trello&logoColor=white)](https://trello.com/b/SAz9J6AA/public-pyla-trello)
+[![Trello](https://img.shields.io/badge/Trello-0079BF?logo=trello&logoColor=white)](https://trello.com/b/SAz9J6AA/public-xlambot-trello)
 
 > [!WARNING]
 > **Warning**: There are two versions of xlamBOT, you are currently browsing the source code for developers. Please visit our [Discord](https://discord.gg/xUusk3fw4A) to use the compiled version, which comes as a ready-to-use `.exe`.
 
 xlamBOT is currently the best external Brawl Stars bot.
+
+## Where to get help
+
+Updates, questions and builds: [Канал xlamModz](https://t.me/xlamModz)
 
 ## Requirements
 
@@ -61,8 +65,8 @@ python main.py
 
 | Flag | Effect |
 | --- | --- |
-| *(none)* | Console visible, UI in the Pyla desktop window |
-| `--no-console` | Hides the console window, output goes to `pyla.log` in the current folder. Ignored when Pyla is started from an existing terminal, so your own terminal is never hidden. |
+| *(none)* | Console visible, UI in the xlamBOT desktop window |
+| `--no-console` | Hides the console window, output goes to `xlambot.log` in the current folder. Ignored when xlamBOT is started from an existing terminal, so your own terminal is never hidden. |
 | `--no-webapp` | Opens the UI in the default browser instead of the desktop window |
 
 

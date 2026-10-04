@@ -30,7 +30,14 @@ def _get_project_root():
     import sys
     from pathlib import Path
     if getattr(sys, 'frozen', False):
-        return Path(sys.executable).parent.parent
+        # В собранной папке лежат две разные вещи: сам исполняемый файл рядом
+        # с пользователем, а ресурсы - в папке _internal рядом с ним. Раньше
+        # здесь возвращался каталог уровнем выше exe, и программа искала
+        # настройки и модели на уровень выше, то есть не находила их вовсе.
+        base = getattr(sys, '_MEIPASS', None)
+        if base:
+            return Path(base)
+        return Path(sys.executable).resolve().parent
     return Path.cwd().resolve()
 
 
@@ -51,7 +58,7 @@ def resolve_within(base_path, *parts) -> Path:
 
 def resolve_playstyle_path(filename) -> Path:
     filename = str(filename or "").strip()
-    if not filename or Path(filename).name != filename or not filename.lower().endswith(".pyla"):
+    if not filename or Path(filename).name != filename or not filename.lower().endswith(".xlambot"):
         raise ValueError("Invalid playstyle filename.")
     return resolve_within("playstyles", filename)
 
@@ -173,8 +180,9 @@ try:
     default_api = OFFICIAL_API
 except (ImportError, ModuleNotFoundError):
     default_api = "localhost"
-cfg_api_base_url = load_toml_as_dict("cfg/general_config.toml").get("api_base_url", "default")
-api_base_url = cfg_api_base_url if cfg_api_base_url != "default" else default_api
+# xlamBOT работает полностью локально: список бойцов, шаблоны экрана и
+# модели лежат рядом с программой. Обращений к серверам нет.
+api_base_url = "localhost"
 brawlers_info_file_path = PROJECT_ROOT / "cfg" / "brawlers_info.json"
 
 
@@ -213,10 +221,17 @@ def brawler_queue_path() -> Path:
     belongs to that device, and sits beside its cfg directory — otherwise every
     bot would read and overwrite the same list, and the panel would show one
     device's roster for all of them.
+
+    A profile that has no queue of its own falls back to the shared one, the
+    same way the settings do. That is what lets the built program work with a
+    device it has never seen before: there are no profiles on disk yet, and
+    without the fallback it started with an empty list and refused to play.
     """
     root = get_config_root()
     if root != resolve_project_path("cfg"):
-        return root.parent / "latest_brawler_data.json"
+        own = root.parent / "latest_brawler_data.json"
+        if own.is_file():
+            return own
     return resolve_project_path("latest_brawler_data.json")
 
 
@@ -464,8 +479,9 @@ def save_brawler_icon(brawler_name):
     print(f"Icon not found for brawler '{brawler_name}'")
 
 
-PYLA_VERSION = "0.8.15"
-DOWNLOAD_URL = "https://pyla-ai.angelfirela.dev/download"
+XLAMBOT_VERSION = "0.8.15"
+# Скачивать нечего: программа полностью локальная.
+DOWNLOAD_URL = ""
 
 
 def get_latest_version():
@@ -496,9 +512,9 @@ def check_version():
     if api_base_url != "localhost":
         latest_version = get_latest_version()
         if latest_version:
-            if version.parse(PYLA_VERSION) < version.parse(latest_version):
+            if version.parse(XLAMBOT_VERSION) < version.parse(latest_version):
                 print(
-                    "Warning: You are not using the latest public version of Pyla. "
+                    "Warning: You are not using the latest public version of xlamBOT. "
                     f"Download it here: {DOWNLOAD_URL}"
                 )
         else:
@@ -542,17 +558,17 @@ def notify_user(message_type, screenshot, stage_manager) -> None:
         return
 
     if message_type == "completed":
-        status_line = f"Pyla has completed all its targets!"
+        status_line = f"xlamBOT has completed all its targets!"
     elif message_type == "bot_is_stuck":
         status_line = f"Your bot is currently stuck, attempted to restart brawl stars !"
     elif message_type == "brawler_goal":
         current_brawler = stage_manager.brawlers_pick_data[0]["brawler"]
-        status_line = f"Pyla completed brawler goal for {current_brawler}!"
+        status_line = f"xlamBOT completed brawler goal for {current_brawler}!"
     elif message_type in ["regular_minutes_ping", "regular_matches_ping"]:
-        status_line = "Pyla is still running."
+        status_line = "xlamBOT is still running."
     elif message_type == "bot_failed_brawler_selection":
         current_brawler = stage_manager.brawlers_pick_data[0]["brawler"]
-        status_line = f"Pyla failed to select the brawler {current_brawler} after multiple attempts, try changing the OCR Scale Down setting or select it manually and restart. Putting it at the end of the queue and skipping it..."
+        status_line = f"xlamBOT failed to select the brawler {current_brawler} after multiple attempts, try changing the OCR Scale Down setting or select it manually and restart. Putting it at the end of the queue and skipping it..."
     else:
         status_line = "Notification"
 
@@ -587,7 +603,7 @@ def notify_user(message_type, screenshot, stage_manager) -> None:
 
         payload = {
             "content": ping,
-            "username": "Pyla notifier",
+            "username": "xlamBOT notifier",
             "embeds": [embed],
         }
 
@@ -811,44 +827,44 @@ def is_safe_ast(code_str):
     return True, None
 
 
-def interpret_pyla_code(pyla_code, context):
+def interpret_playstyle_code(playstyle_code, context):
     safe_globals = SAFE_GLOBALS.copy()
     safe_globals.update(context)
     safe_globals['__builtins__'] = {}
 
     try:
-        if isinstance(pyla_code, str):
-            is_safe, error_msg = is_safe_ast(pyla_code)
+        if isinstance(playstyle_code, str):
+            is_safe, error_msg = is_safe_ast(playstyle_code)
             if not is_safe:
                 print(f"Security/Syntax Validation Failed for playstyle: {error_msg}")
                 return None, safe_globals
-            compiled_code = compile(pyla_code, '<string>', 'exec')
+            compiled_code = compile(playstyle_code, '<string>', 'exec')
         else:
-            compiled_code = pyla_code
+            compiled_code = playstyle_code
 
         if compiled_code is not None:
             exec(compiled_code, safe_globals)
     except Exception as e:
-        print(f"Error executing .pyla code")
+        print(f"Error executing .xlambot code")
         traceback.print_exc()
         return None, safe_globals
 
     return safe_globals.get('movement', None), safe_globals
 
 
-def load_pyla_script(filename):
+def load_playstyle_script(filename):
     try:
         script_path = resolve_playstyle_path(filename)
         with open(script_path, 'r', encoding='utf-8') as file:
             metadata_header = file.readline().strip()
             metadata = json.loads(metadata_header) if metadata_header else {}
-            pyla_script = file.read()
-        return metadata, pyla_script
+            playstyle_source = file.read()
+        return metadata, playstyle_source
     except FileNotFoundError:
         print(f"Error: The playstyle file '{filename}' was not found.")
         return {}, ""
     except Exception as e:
-        print(f"An error occurred while loading the .pyla script: {e}")
+        print(f"An error occurred while loading the .xlambot script: {e}")
         traceback.print_exc()
         return {}, ""
 
@@ -858,8 +874,8 @@ def get_playstyles_list():
     playstyles = []
     if playstyles_dir.exists():
         for filename in os.listdir(playstyles_dir):
-            if filename.endswith(".pyla"):
-                metadata, _ = load_pyla_script(filename)
+            if filename.endswith(".xlambot"):
+                metadata, _ = load_playstyle_script(filename)
                 playstyles.append({
                     "filename": filename,
                     "metadata": metadata
@@ -867,10 +883,10 @@ def get_playstyles_list():
     return playstyles
 
 
-def load_default_pyla_script():
+def load_default_playstyle():
     config = load_toml_as_dict("cfg/bot_config.toml")
-    current_playstyle = config.get("current_playstyle", "default_up.pyla")
-    return load_pyla_script(current_playstyle)
+    current_playstyle = config.get("current_playstyle", "default_up.xlambot")
+    return load_playstyle_script(current_playstyle)
 
 
 def hash_playstyle(playstyle_info):

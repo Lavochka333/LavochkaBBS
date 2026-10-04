@@ -8,13 +8,13 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="icon" type="image/png" href="/api/assets/support/logo_no_background.png">
+    <link rel="icon" type="image/png" href="/api/assets/support/xlambot_logo.png">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/panel.css') }}?v={{ asset_version }}">
 </head>
 <body class="panel-body">
     <header class="panel-header">
         <div class="panel-header-left">
-            <img class="panel-logo" src="/api/assets/support/logo_no_background.png" alt="xlamBOT">
+            <img class="panel-logo" src="/api/assets/support/xlambot_logo.png" alt="xlamBOT">
             <div>
                 <h1 class="panel-title">Управление ботами</h1>
                 <p class="panel-subtitle">Мульти-устройство ADB · xlamBOT</p>
@@ -27,6 +27,7 @@
             <button id="stopAllBtn" class="btn btn-danger" type="button">Остановить</button>
             <button id="refreshBtn" class="btn btn-ghost" type="button">Обновить</button>
             <span id="pollAge" class="poll-age">нет связи</span>
+            <a class="btn btn-ghost channel-link" href="https://t.me/xlamModz" target="_blank" rel="noreferrer" title="Канал с обновлениями xlamBOT">Канал xlamModz</a>
             <a class="btn btn-ghost" href="/" title="Настройки, редактор очереди, плейстайлы и история">Настройки</a>
         </div>
     </header>

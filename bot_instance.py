@@ -1,7 +1,7 @@
 """A single bot instance bound to one ADB device.
 
 ``BotInstance`` is the per-device version of the loop that used to live inside
-``main.pyla_main``. Every instance owns its own ``WindowController`` (and therefore
+``main.xlambot_main``. Every instance owns its own ``WindowController`` (and therefore
 its own scrcpy stream), its own play/queue state, and runs in its own thread inside
 the device's config scope so several devices can be automated simultaneously.
 """
@@ -21,7 +21,7 @@ from stage_manager import StageManager
 from state_finder import get_state
 from time_management import TimeManagement
 from utils import (
-    cprint, clean_queue, load_pyla_script, load_toml_as_dict, notify_user, save_brawler_data,
+    cprint, clean_queue, load_playstyle_script, load_toml_as_dict, notify_user, save_brawler_data,
 )
 
 # Imported as plain modules, not as device-scoped helpers: every instance already
@@ -52,7 +52,7 @@ def apply_play_order(queue_data):
 
 
 class BotInstance:
-    """Runs the Pyla bot loop against one ADB device."""
+    """Runs the xlamBOT bot loop against one ADB device."""
 
     def __init__(self, discord_bot, queue_data, stop_event=None, runtime_control=None,
                  serial=None, device_key=None, device_label=None):
@@ -65,7 +65,7 @@ class BotInstance:
         self.latest_state_frame_time = 0.0
         self._error = ""
 
-        current_playstyle = load_toml_as_dict("cfg/bot_config.toml").get("current_playstyle", "default_up.pyla")
+        current_playstyle = load_toml_as_dict("cfg/bot_config.toml").get("current_playstyle", "default_up.xlambot")
         raw_max_fps = load_toml_as_dict("cfg/general_config.toml").get("max_fps")
         try:
             self.max_fps = int(raw_max_fps)
@@ -90,8 +90,8 @@ class BotInstance:
         save_brawler_data(data)
         print(f"[{self.device_label}] Starting with queue data: {data}")
 
-        self.playstyle_info, pyla_code = load_pyla_script(current_playstyle)
-        self.Play = Play(*self.load_models(), self.window_controller, pyla_code)
+        self.playstyle_info, playstyle_code = load_playstyle_script(current_playstyle)
+        self.Play = Play(*self.load_models(), self.window_controller, playstyle_code)
         self.Time_management = TimeManagement()
         self.lobby_automator = LobbyAutomation(self.window_controller)
         self.runtime_control = runtime_control
@@ -213,7 +213,7 @@ class BotInstance:
             target=self.state_checker_loop,
             args=(config_root,),
             daemon=True,
-            name=f"pyla-state-checker-{self.device_key or 'default'}")
+            name=f"xlambot-state-checker-{self.device_key or 'default'}")
         # A dead checker would freeze the state on whatever it last saw, so a
         # fresh one is started whenever the previous run is gone.
         self.state_checker_thread.start()
@@ -281,7 +281,7 @@ class BotInstance:
 
         self.window_controller.release_movement()
         self.runtime_control.mark_paused()
-        cprint(f"Pyla is paused in the lobby. Waiting for Start to resume. ({self.device_label})", "#AAE5A4")
+        cprint(f"xlamBOT is paused in the lobby. Waiting for Start to resume. ({self.device_label})", "#AAE5A4")
 
         while self.should_pause() and not self.should_stop():
             state = self.get_latest_state()
@@ -547,7 +547,7 @@ def run_bot_instance(discord_bot, queue_data, stop_event=None, runtime_control=N
     except SystemExit as exit_error:
         instance.close()
         code = exit_error.code if isinstance(exit_error.code, int) else 0
-        return {"ok": code in (0, None), "message": f"Pyla exited with code {code}."}
+        return {"ok": code in (0, None), "message": f"xlamBOT exited with code {code}."}
     except Exception as error:
         instance.close()
         return {"ok": False, "message": str(error)}
@@ -556,4 +556,4 @@ def run_bot_instance(discord_bot, queue_data, stop_event=None, runtime_control=N
             instance.close()
         except Exception:
             pass
-    return {"ok": True, "message": "Pyla finished."}
+    return {"ok": True, "message": "xlamBOT finished."}

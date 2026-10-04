@@ -27,7 +27,7 @@ _BUNDLED_WEBVIEW_BINARIES = (
 
 
 def console_log_path() -> Path:
-    return Path.cwd() / "pyla.log"
+    return Path.cwd() / "xlambot.log"
 
 
 def hide_console(log_path: Path | None = None) -> bool:
@@ -182,7 +182,7 @@ def run_webview(
     server_thread = threading.Thread(
         target=server.serve_forever,
         daemon=True,
-        name="pyla-web-server",
+        name="xlambot-web-server",
     )
     server_thread.start()
 

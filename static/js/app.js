@@ -113,9 +113,9 @@ const SETTINGS_META = {
     general: [
         { key: "player_tag", label: "Player Tag", type: "text", placeholder: "#PLAYER", help: "Used to autofill live trophies and win streaks inside the brawler editor. Use your Brawl Stars player tag, not your Supercell ID." },
         { key: "default_trophy_target", label: "Default Trophy Target", type: "number", help: "Default trophy target used when adding a new brawler to the queue." },
-        { key: "run_for_minutes", label: "Run Time", type: "number", suffix: "min", help: "How long Pyla runs before cooldown logic takes over." },
-        { key: "interface_mode", label: "Interface Mode", type: "select", options: [{ value: "desktop", label: "Integrated window" }, { value: "browser", label: "System browser" }, { value: "headless", label: "Headless" }], help: "Choose what Pyla opens at startup. Headless opens no window or browser, but the local web UI remains available. Requires a full restart." },
-        { key: "max_fps", label: "Max FPS", type: "text", help: "Processing cap. Use auto if you want Pyla to manage it." },
+        { key: "run_for_minutes", label: "Run Time", type: "number", suffix: "min", help: "How long xlamBOT runs before cooldown logic takes over." },
+        { key: "interface_mode", label: "Interface Mode", type: "select", options: [{ value: "desktop", label: "Integrated window" }, { value: "browser", label: "System browser" }, { value: "headless", label: "Headless" }], help: "Choose what xlamBOT opens at startup. Headless opens no window or browser, but the local web UI remains available. Requires a full restart." },
+        { key: "max_fps", label: "Max FPS", type: "text", help: "Processing cap. Use auto if you want xlamBOT to manage it." },
         { key: "used_threads", label: "Threads", type: "text", help: "Worker thread count. Auto keeps the current behavior." },
         { key: "cpu_or_gpu", label: "CPU / GPU", type: "select", options: [{ value: "auto", label: "Auto" }, { value: "gpu", label: "GPU" }, { value: "cpu", label: "CPU" }], help: "Inference device. Auto tries CUDA, then DirectML, then CPU. Requires a restart." },
         { key: "trophies_multiplier", label: "Trophies Multiplier", type: "number", help: "Useful for custom arenas or multiplier-based modes." },
@@ -149,12 +149,12 @@ const SETTINGS_META = {
         { key: "hypercharge_pixels_minimum", label: "Hypercharge Pixels", type: "number", help: "Purple pixel threshold for hypercharge readiness." },
     ],
     timers: [
-        { key: "super", label: "Super Delay", min: 0.1, max: 10, step: 0.1, help: "How often Pyla checks if super is available." },
-        { key: "hypercharge", label: "Hypercharge Delay", min: 0.1, max: 10, step: 0.1, help: "How often Pyla checks if hypercharge is available." },
-        { key: "gadget", label: "Gadget Delay", min: 0.1, max: 10, step: 0.1, help: "How often Pyla checks gadgets." },
+        { key: "super", label: "Super Delay", min: 0.1, max: 10, step: 0.1, help: "How often xlamBOT checks if super is available." },
+        { key: "hypercharge", label: "Hypercharge Delay", min: 0.1, max: 10, step: 0.1, help: "How often xlamBOT checks if hypercharge is available." },
+        { key: "gadget", label: "Gadget Delay", min: 0.1, max: 10, step: 0.1, help: "How often xlamBOT checks gadgets." },
         { key: "wall_detection", label: "Wall Detection", min: 0.1, max: 10, step: 0.1, help: "Wall scan cadence." },
         { key: "no_detection_proceed", label: "Proceed Delay", min: 0.1, max: 10, step: 0.1, help: "Delay before pressing proceed when no detections are found." },
-        { key: "state_check", label: "State Check", min: 0.1, max: 10, step: 0.1, help: "How often Pyla checks the game state." },
+        { key: "state_check", label: "State Check", min: 0.1, max: 10, step: 0.1, help: "How often xlamBOT checks the game state." },
         { key: "idle", label: "Idle Check", min: 0.1, max: 10, step: 0.1, help: "How often idle detection runs." },
         { key: "check_if_brawl_stars_crashed", label: "Crash Check", min: 0.1, max: 10, step: 0.1, help: "How often crash recovery checks run." },
     ],
@@ -162,7 +162,7 @@ const SETTINGS_META = {
         { key: "discord_id", label: "Discord ID", type: "text", help: "Your discord user ID. Required to use a discord bot or be pinged in webhooks." },
         { key: "webhook_url", label: "Webhook URL", type: "url", secret: true, help: "Discord webhook endpoint used for notifications." },
         { key: "discord_bot_token", label: "Discord Bot Token", type: "password", secret: true, help: "Discord bot token used for remote control commands. Requires full restart to apply." },
-        { key: "ping_when_stuck", label: "Ping When Stuck", type: "checkbox", help: "Send a ping when Pyla gets stuck." },
+        { key: "ping_when_stuck", label: "Ping When Stuck", type: "checkbox", help: "Send a ping when xlamBOT gets stuck." },
         { key: "ping_when_target_is_reached", label: "Ping On Target", type: "checkbox", help: "Send a ping when a target finishes." },
         { key: "ping_every_x_match", label: "Ping Every X Matches", type: "number", help: "0 disables periodic match pings." },
         { key: "ping_every_x_minutes", label: "Ping Every X Minutes", type: "number", help: "0 disables periodic minute pings." },
@@ -400,7 +400,7 @@ function safeExternalUrl(value) {
 
 function getSeenAnnouncementIds() {
     try {
-        const parsed = JSON.parse(getStorageItem("pylaSeenAnnouncements", "[]"));
+        const parsed = JSON.parse(getStorageItem("xlambotSeenAnnouncements", "[]"));
         return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
     } catch (error) {
         return new Set();
@@ -439,7 +439,7 @@ function showPendingAnnouncements() {
 
     const dismiss = () => {
         seen.add(String(announcement.id));
-        setStorageItem("pylaSeenAnnouncements", JSON.stringify([...seen].slice(-200)));
+        setStorageItem("xlambotSeenAnnouncements", JSON.stringify([...seen].slice(-200)));
         document.getElementById("announcementModal")?.remove();
         showPendingAnnouncements();
     };
@@ -453,13 +453,13 @@ function renderDashboard() {
     const canStart = queue.length > 0 && !["running", "pausing", "stopping"].includes(runtime.state);
     const isPaused = runtime.state === "paused";
     const statusCopy = runtime.state === "error"
-        ? (runtime.last_error || "Pyla stopped with an error.")
+        ? (runtime.last_error || "xlamBOT stopped with an error.")
         : runtime.state === "pausing"
-            ? "Pause requested. Pyla will stop in the lobby."
+            ? "Pause requested. xlamBOT will stop in the lobby."
             : runtime.state === "stopping"
-                ? "Pyla is shutting down. This should only take a few seconds."
+                ? "xlamBOT is shutting down. This should only take a few seconds."
                 : isPaused
-                    ? "Pyla is paused. Press Start to resume."
+                    ? "xlamBOT is paused. Press Start to resume."
                     : canStart
                         ? "Queue is ready. Start xlamBOT from here."
                         : queue.length
@@ -529,9 +529,7 @@ function renderDashboard() {
                 <div class="profile-switcher-heading">
                     <div class="profile-heading-copy">
                         <p class="eyebrow">Profiles</p>
-                        <div class="profile-title-row"><h3 class="panel-title">One setup today, more with Premium</h3><span class="premium-badge-inline">Premium</span></div>
-                    </div>
-                    <a class="btn btn-sm profile-add-btn premium-cta" href="https://pyla-ai.angelfirela.dev/premium" target="_blank" rel="noreferrer">Explore Premium</a>
+</div>
                 </div>
                 <div class="profile-list premium-profile-list">
                     <div class="profile-entry is-active">
@@ -929,7 +927,7 @@ function renderPlaystyles() {
                         </div>
                         <div class="toolbar-actions">
                             <button id="importPlaystyleBtn" class="btn">${iconMarkup("import")} Import</button>
-                            <input id="playstyleFileInput" type="file" accept=".pyla" class="hidden">
+                            <input id="playstyleFileInput" type="file" accept=".xlambot" class="hidden">
                         </div>
                     </div>
 
@@ -1969,13 +1967,13 @@ function bindRuntimeButtons() {
     const startOrResume = async () => {
         const result = await fetchJSON("/api/runtime/start", { method: "POST" }, true);
         if (!result.ok) {
-            showToast(result.message || "Unable to start Pyla.", "error");
+            showToast(result.message || "Unable to start xlamBOT.", "error");
             return;
         }
         state.bootstrap.runtime = result.runtime;
         renderDashboard();
         renderQueueDock();
-        showToast(result.message || "Pyla runtime started.", "success");
+        showToast(result.message || "xlamBOT runtime started.", "success");
     };
 
     document.getElementById("startRuntimeBtn")?.addEventListener("click", async (event) => {
@@ -1992,7 +1990,7 @@ function bindRuntimeButtons() {
         if (!result.ok) {
             state.bootstrap.runtime = previousRuntime;
             renderDashboard();
-            showToast(result.message || "Unable to pause Pyla.", "error");
+            showToast(result.message || "Unable to pause xlamBOT.", "error");
             return;
         }
         state.bootstrap.runtime = result.runtime;
@@ -2008,7 +2006,7 @@ function bindRuntimeButtons() {
         if (!result.ok) {
             state.bootstrap.runtime = previousRuntime;
             renderDashboard();
-            showToast(result.message || "Unable to stop Pyla.", "error");
+            showToast(result.message || "Unable to stop xlamBOT.", "error");
             return;
         }
         state.bootstrap.runtime = result.runtime;
@@ -2043,7 +2041,7 @@ async function refreshRuntimeState() {
         const previousState = state.bootstrap.runtime?.state;
         state.bootstrap.runtime = result.runtime;
         updateSessionTimer();
-        // Keep this as a second refresh trigger while Pyla is running. The
+        // Keep this as a second refresh trigger while xlamBOT is running. The
         // dedicated History poller can be throttled by an embedded WebView, and
         // refreshMatchHistory de-duplicates overlapping requests.
         if (result.runtime.is_running) await refreshMatchHistory();
@@ -2051,7 +2049,7 @@ async function refreshRuntimeState() {
         if (previousState !== result.runtime.state) {
             renderDashboard();
             renderQueueDock();
-            if (result.runtime.state === "error") showToast(result.runtime.last_error || "Pyla stopped with an error.", "error");
+            if (result.runtime.state === "error") showToast(result.runtime.last_error || "xlamBOT stopped with an error.", "error");
             if (previousState === "running" && !result.runtime.is_running) await refreshMatchHistory();
         }
         if (state.currentView === "logs") await refreshLogs();
@@ -2647,7 +2645,7 @@ function bindPlaystyleEvents() {
     });
 
     document.getElementById("importPlaystyleBtn")?.addEventListener("click", () => {
-        if (!window.confirm("WARNING: Importing custom playstyles carries security risks.\nPlaystyle files (.pyla) contain Python code that runs directly on your system.\nOnly import playstyles from authors you completely trust.\n\nDo you want to proceed?")) {
+        if (!window.confirm("WARNING: Importing custom playstyles carries security risks.\nPlaystyle files (.xlambot) contain Python code that runs directly on your system.\nOnly import playstyles from authors you completely trust.\n\nDo you want to proceed?")) {
             return;
         }
         document.getElementById("playstyleFileInput")?.click();
@@ -3279,10 +3277,9 @@ function showPremiumModal() {
                 <div class="modal-header">
                     <p class="eyebrow premium-copy">Premium Feature</p>
                     <h3>Unlock more automation</h3>
-                    <p>Profiles, live player data, Push All and selected advanced controls are available in Pyla Premium. The public edition remains free and open-source.</p>
+                    <p>Profiles, live player data, Push All and selected advanced controls are available in xlamBOT Premium. The public edition remains free and open-source.</p>
                 </div>
                 <div class="premium-modal-actions">
-                    <a class="btn btn-primary w-full premium-cta" href="https://pyla-ai.angelfirela.dev/premium" target="_blank" rel="noreferrer">Explore Premium</a>
                     <button id="closePremiumModalBtn" class="btn w-full" type="button">Maybe later</button>
                 </div>
             </div>`;
@@ -3416,7 +3413,7 @@ function saveLogsToTxt() {
         const a = document.createElement("a");
         a.href = url;
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-        a.download = `pyla_bot_logs_${timestamp}.txt`;
+        a.download = `xlambot_bot_logs_${timestamp}.txt`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

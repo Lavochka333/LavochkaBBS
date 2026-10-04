@@ -420,7 +420,7 @@
             const style = telemetry.playstyle;
             // The playstyle decides how the brawler moves and fights, so which
             // one is loaded is worth seeing rather than having to open a file.
-            styleEl.textContent = style ? String(style).replace(/\.pyla$/, '') : '';
+            styleEl.textContent = style ? String(style).replace(/\.xlambot$/, '') : '';
             styleEl.hidden = !style;
             styleEl.title = 'Файл плейстайла, который бот выполняет прямо сейчас. '
                 + 'Именно он решает, как боец двигается и когда атакует.';
