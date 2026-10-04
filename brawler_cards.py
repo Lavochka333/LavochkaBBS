@@ -142,7 +142,9 @@ def read_card(frame, index, known, discover=False):
     except (pytesseract.TesseractError, UnicodeDecodeError):
         return result
     result['brawler'] = name
-    result['trophies'] = int(digits) if re.fullmatch(r'\d{1,5}', digits) else None
+    # Card contours include coloured badges/progress and are unsuitable for
+    # authoritative trophy totals. Confirm the counter in the lobby instead.
+    result['trophies'] = None
     height, width = frame.shape[:2]
     result['click'] = ((x + w * .4) * 1920 / width, (y + h * .45) * 1080 / height)
     return result

@@ -304,6 +304,15 @@ class StageManager:
             self.Trophy_observer.confirm_trophies(value, name)
             self.brawlers_pick_data[0]['trophies'] = value
             save_brawler_data(self.brawlers_pick_data)
+            import json
+            from utils import account_data_root
+            path = account_data_root() / 'roster.json'
+            if path.exists():
+                roster = json.loads(path.read_text(encoding='utf-8'))
+                for row in roster.get('brawlers', []):
+                    if row['name'] == name:
+                        row['trophies'] = value
+                path.write_text(json.dumps(roster, ensure_ascii=False, indent=2), encoding='utf-8')
             return value
         self.Trophy_observer.trophies_confirmed = False
         return None

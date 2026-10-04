@@ -143,7 +143,10 @@ def read_confirmed_lobby(frame):
     crop = _crop(frame, (958, 155, 110, 45))
     if not OCR_AVAILABLE or crop is None:
         return None
-    grey = cv2.resize(cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY), None, fx=4, fy=4)
+    # Trophy icons are gold and can be read as an extra leading 9. Lobby
+    # numerals are white: remove coloured pixels before reading the number.
+    white = cv2.inRange(cv2.cvtColor(crop, cv2.COLOR_RGB2HSV), (0, 0, 190), (180, 80, 255))
+    grey = 255 - cv2.resize(white, None, fx=4, fy=4)
     text = pytesseract.image_to_string(grey, config=OCR_CONFIG).strip()
     return int(text) if re.fullmatch(r'\d{1,5}', text) else None
 
