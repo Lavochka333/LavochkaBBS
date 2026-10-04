@@ -235,6 +235,9 @@
                     <details class="disclosure" data-queue-details="${escapeHtml(key)}">
                         <summary>Очередь бойцов</summary>
                         <div class="section-title">Выбрать одного бойца</div>
+                        <input class="input" type="search" placeholder="Поиск: Шелли или Shelly" data-brawler-search="${escapeHtml(key)}">
+                        <button class="btn btn-sm" type="button" data-action="scan-roster" data-key="${escapeHtml(key)}">Обновить бойцов аккаунта</button>
+                        <div class="auto-note" data-roster-status="${escapeHtml(key)}"></div>
                         <select class="input" data-brawler-select="${escapeHtml(key)}" aria-label="Боец"></select>
                         <button class="btn btn-sm btn-primary" type="button" data-action="choose-brawler" data-key="${escapeHtml(key)}">Играть этим бойцом</button>
                         <div class="queue-list" data-queue="${escapeHtml(key)}">
@@ -621,19 +624,14 @@
         const recent = telemetry.recent_matches;
         let perMatchText = '—';
         let perMatchNote = '';
-        let perMatchTitle = 'Средняя дельта трофеев за последние матчи.';
-        if (recent && recent.count) {
-            const sign = recent.mean > 0 ? '+' : '';
-            perMatchText = `${sign}${recent.mean}`;
-            perMatchClass = recent.mean > 0 ? ' rate-up' : (recent.mean < 0 ? ' rate-down' : '');
-            perMatchNote = `за ${recent.count}`;
-            perMatchTitle = `Трофеев за матч: среднее ${recent.mean}, `
-                + `медиана ${recent.median} по последним ${recent.count} матчам; `
-                + `плюс в ${recent.positive} из них. `
-                + `Медиана показана рядом со средним, потому что одно `
-                + `испорченное значение способно переврать среднее.`;
+        let perMatchTitle = 'Изменение кубков последнего матча, подтверждённое счётчиком игры.';
+        if (recent && recent.last != null) {
+            perMatchText = `${recent.last > 0 ? '+' : ''}${recent.last}`;
+            perMatchClass = recent.last > 0 ? ' rate-up' : (recent.last < 0 ? ' rate-down' : '');
+            perMatchNote = 'по счётчику игры';
         } else {
             perMatchClass = '';
+            perMatchNote = 'жду подтверждения';
         }
 
         stats.innerHTML = `
@@ -701,7 +699,7 @@
                      onerror="this.style.visibility='hidden'">
                 <div class="queue-item-body">
                     <div class="queue-item-name">${escapeHtml(item.brawler)}</div>
-                    <div class="queue-item-target">${current} трофеев (сохранённая оценка)</div>
+                    <div class="queue-item-target">${current} трофеев (последнее измерение)</div>
                 </div>
                 ${isLive ? '<span class="badge badge-running">сейчас</span>' : ''}
             </div>`;
@@ -735,15 +733,33 @@
         return devices;
     }
 
-    async function loadBrawlers() {
-        const { data } = await api('/api/devices/brawlers');
-        if (!data || !Array.isArray(data.brawlers)) return;
-        grid.querySelectorAll('[data-brawler-select]').forEach((select) => {
-            const previous = select.value;
-            select.innerHTML = data.brawlers.map((b) => `<option value="${escapeHtml(b.name)}">${escapeHtml(b.name)}</option>`).join('');
-            if (previous) select.value = previous;
-        });
+    const rosters = {};
+    const russianNames = {shelly:'Шелли', colt:'Кольт', nita:'Нита', bull:'Булл', brock:'Брок', barley:'Барли', poco:'Поко', rosa:'Роза', jessie:'Джесси', dynamike:'Динамайк', elprimo:'Эль Примо', jacky:'Джэки', gus:'Гас', gale:'Гейл', emz:'Эмз', frank:'Фрэнк', carl:'Карл'};
+    function filterBrawlers(key) {
+        const select = grid.querySelector(`[data-brawler-select="${cssEscape(key)}"]`);
+        if (!select) return;
+        const input = grid.querySelector(`[data-brawler-search="${cssEscape(key)}"]`);
+        const query = (input?.value || '').trim().toLowerCase();
+        const previous = select.value;
+        const rows = (rosters[key]?.brawlers || []).filter(b => `${b.name} ${russianNames[b.name] || ''}`.toLowerCase().includes(query));
+        select.innerHTML = rows.map(b => `<option value="${escapeHtml(b.name)}">${escapeHtml(russianNames[b.name] || b.name)}${b.trophies == null ? '' : ` · ${b.trophies} кубков`}</option>`).join('');
+        if (rows.some(b => b.name === previous)) select.value = previous;
+        select.disabled = !rows.length;
     }
+    async function loadBrawlers() {
+        await Promise.all(Array.from(grid.querySelectorAll('[data-brawler-select]')).map(async select => {
+            const key = select.dataset.brawlerSelect;
+            const {data} = await api(`/api/devices/${encodeURIComponent(key)}/roster`);
+            if (!data) return;
+            rosters[key] = data;
+            filterBrawlers(key);
+            const label = grid.querySelector(`[data-roster-status="${cssEscape(key)}"]`);
+            if (label) label.textContent = data.message || (data.tag ? `Аккаунт #${data.tag}: ${data.brawlers.length} из ${data.expected} открытых бойцов${data.complete ? '' : ' — обнови список для остальных'}` : 'Открой главный экран игры и обнови бойцов аккаунта.');
+        }));
+    }
+    grid.addEventListener('input', event => {
+        if (event.target.dataset.brawlerSearch) filterBrawlers(event.target.dataset.brawlerSearch);
+    });
 
     const queues = {};
     async function loadQueue(key) {
@@ -830,7 +846,17 @@
         button.classList.add('is-busy');
 
         try {
-            if (action === 'choose-brawler') {
+            if (action === 'scan-roster') {
+                const {data} = await api(`/api/devices/${encodeURIComponent(key)}/roster`, {method:'POST'});
+                if (!data?.ok) return;
+                button.disabled = true;
+                try {
+                    do {
+                        await new Promise(resolve => setTimeout(resolve, 1500));
+                        await loadBrawlers();
+                    } while (rosters[key]?.scanning);
+                } finally { button.disabled = false; }
+            } else if (action === 'choose-brawler') {
                 if (['starting', 'running', 'paused', 'pausing', 'stopping'].includes(runtimeStateOf(key))) {
                     toast('Останови бота перед выбором бойца.', 'error');
                     return;
@@ -843,8 +869,10 @@
                     push_until: 1000, win_streak: 0,
                 };
                 entry.automatically_pick = true;
+                const observed = rosters[key]?.brawlers.find(b => b.name === name);
+                if (observed?.trophies != null) entry.trophies = observed.trophies;
                 const saved = await api(`/api/devices/${encodeURIComponent(key)}/queue`, {
-                    method: 'POST', body: { items: [entry, ...items.filter((item) => item.brawler !== name)] },
+                    method: 'POST', body: { items: [entry] },
                 });
                 if (!saved.ok) return;
                 const settings = await api(`/api/devices/${encodeURIComponent(key)}/settings`, {

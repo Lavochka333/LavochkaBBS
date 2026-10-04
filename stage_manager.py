@@ -52,7 +52,7 @@ class StageManager:
         # last account total is both the drift baseline and the reader's anchor.
         self.Trophy_observer.load_account_state()
         self.time_since_last_stat_change = time.time()
-        self.play_again_on_win = load_toml_as_dict("./cfg/bot_config.toml")["play_again_on_win"] == "yes"
+        self.play_again_on_win = False  # Return to lobby to confirm actual match trophies.
         self.window_controller = window_controller
         self.states = {
             'shop': self.quit_shop,
@@ -139,9 +139,9 @@ class StageManager:
     # The fourth column is cut off by the screen edge, so it is not usable.
     CARD_GRID_SIZE = 9
 
-    # Сколько раз подряд можно повторять выбор бойца, прежде чем сдаться.
-    # Раньше повторов не было вовсе, и на несовместимой сортировке бот висел
-    # в меню выбора бесконечно.
+    # РЎРєРѕР»СЊРєРѕ СЂР°Р· РїРѕРґСЂСЏРґ РјРѕР¶РЅРѕ РїРѕРІС‚РѕСЂСЏС‚СЊ РІС‹Р±РѕСЂ Р±РѕР№С†Р°, РїСЂРµР¶РґРµ С‡РµРј СЃРґР°С‚СЊСЃСЏ.
+    # Р Р°РЅСЊС€Рµ РїРѕРІС‚РѕСЂРѕРІ РЅРµ Р±С‹Р»Рѕ РІРѕРІСЃРµ, Рё РЅР° РЅРµСЃРѕРІРјРµСЃС‚РёРјРѕР№ СЃРѕСЂС‚РёСЂРѕРІРєРµ Р±РѕС‚ РІРёСЃРµР»
+    # РІ РјРµРЅСЋ РІС‹Р±РѕСЂР° Р±РµСЃРєРѕРЅРµС‡РЅРѕ.
     BRAWLER_PICK_ATTEMPTS = 3
 
     BRAWLER_SORT_MODES = {
@@ -286,7 +286,7 @@ class StageManager:
             return None
         if not trophy_reader.available():
             return None
-        frame = self.window_controller.screenshot()
+        frame = __import__("numpy").asarray(self.window_controller.device.screenshot())
         try:
             # The last known total disambiguates which number in the top strip
             # is ours; without it the reader can settle on a neighbour.
@@ -296,8 +296,16 @@ class StageManager:
                 self.Trophy_observer.record_account_total(total)
         except Exception:  # noqa: BLE001
             pass
-        # The lobby crop can include prestige progress rather than trophies.
-        # Per-brawler counts are updated only from the selected card.
+        value = trophy_reader.read_confirmed_lobby(frame)
+        time.sleep(.25)
+        check = trophy_reader.read_confirmed_lobby(__import__("numpy").asarray(self.window_controller.device.screenshot()))
+        if value is not None and value == check:
+            name = self.brawlers_pick_data[0]['brawler']
+            self.Trophy_observer.confirm_trophies(value, name)
+            self.brawlers_pick_data[0]['trophies'] = value
+            save_brawler_data(self.brawlers_pick_data)
+            return value
+        self.Trophy_observer.trophies_confirmed = False
         return None
 
     def rotate_to_lowest_trophies(self):
@@ -361,10 +369,10 @@ class StageManager:
             next_brawler_name = self.brawlers_pick_data[0]['brawler']
             if self.brawlers_pick_data[0]["automatically_pick"]:
                 select_brawler = self.Lobby_automation.select_brawler(next_brawler_name, self.get_latest_state, runtime_control=self.runtime_control)
-                # Повторов было безгранично много, а боец ниже кладётся обратно
-                # в очередь, поэтому повторялся ровно тот же выбор: на
-                # сортировке, не совпадающей с порядком очереди, бот так и висел
-                # в меню выбора бойца. Считаем попытки и уходим.
+                # РџРѕРІС‚РѕСЂРѕРІ Р±С‹Р»Рѕ Р±РµР·РіСЂР°РЅРёС‡РЅРѕ РјРЅРѕРіРѕ, Р° Р±РѕРµС† РЅРёР¶Рµ РєР»Р°РґС‘С‚СЃСЏ РѕР±СЂР°С‚РЅРѕ
+                # РІ РѕС‡РµСЂРµРґСЊ, РїРѕСЌС‚РѕРјСѓ РїРѕРІС‚РѕСЂСЏР»СЃСЏ СЂРѕРІРЅРѕ С‚РѕС‚ Р¶Рµ РІС‹Р±РѕСЂ: РЅР°
+                # СЃРѕСЂС‚РёСЂРѕРІРєРµ, РЅРµ СЃРѕРІРїР°РґР°СЋС‰РµР№ СЃ РїРѕСЂСЏРґРєРѕРј РѕС‡РµСЂРµРґРё, Р±РѕС‚ С‚Р°Рє Рё РІРёСЃРµР»
+                # РІ РјРµРЅСЋ РІС‹Р±РѕСЂР° Р±РѕР№С†Р°. РЎС‡РёС‚Р°РµРј РїРѕРїС‹С‚РєРё Рё СѓС…РѕРґРёРј.
                 for _try in range(self.BRAWLER_PICK_ATTEMPTS):
                     if select_brawler not in ("failed", "error", "aborted", "stuck"):
                         break
@@ -377,8 +385,8 @@ class StageManager:
                           f"of {self.BRAWLER_PICK_ATTEMPTS}")
                     if self._sleep_interruptible(2):
                         return
-                    # Уводим непокорного бойца в конец очереди, иначе повтор
-                    # был бы тем же самым выбором.
+                    # РЈРІРѕРґРёРј РЅРµРїРѕРєРѕСЂРЅРѕРіРѕ Р±РѕР№С†Р° РІ РєРѕРЅРµС† РѕС‡РµСЂРµРґРё, РёРЅР°С‡Рµ РїРѕРІС‚РѕСЂ
+                    # Р±С‹Р» Р±С‹ С‚РµРј Р¶Рµ СЃР°РјС‹Рј РІС‹Р±РѕСЂРѕРј.
                     self.quit_shop()
                     stuck = self.brawlers_pick_data.pop(0)
                     self.brawlers_pick_data.append(stuck)

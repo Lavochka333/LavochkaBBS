@@ -2,6 +2,11 @@
 setlocal
 cd /d "%~dp0"
 
+if exist "dist\roster\xlamBOT\xlamBOT.exe" (
+    start "" "dist\roster\xlamBOT\xlamBOT.exe"
+    exit /b 0
+)
+
 if exist "dist\current\xlamBOT\xlamBOT.exe" (
     start "" "dist\current\xlamBOT\xlamBOT.exe"
     exit /b 0

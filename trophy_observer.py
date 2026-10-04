@@ -14,7 +14,7 @@ from datetime import datetime
 #
 # The floor is deliberately long. A burst of +84 trophies in 8 minutes extrapolates
 # to "647/hour", which is arithmetically fine and completely meaningless as an
-# average pace — short windows turn every hot streak into a fake record. Under
+# average pace вЂ” short windows turn every hot streak into a fake record. Under
 # 20 minutes of observation there is no rate to report, only elapsed time.
 TROPHY_RATE_WINDOW_S = 3600
 TROPHY_RATE_MIN_SPAN_S = 20 * 60
@@ -31,7 +31,7 @@ ACCOUNT_TOTAL_MAX_RELATIVE = 0.02
 # repeats, and it then becomes the baseline that rejects the real number. This
 # ceiling is several times larger than the account has ever been, and exists only
 # to reject decimal-place errors.
-ACCOUNT_TOTAL_MIN = 1000
+ACCOUNT_TOTAL_MIN = 0
 ACCOUNT_TOTAL_MAX = 200000
 
 
@@ -88,9 +88,11 @@ class TrophyObserver:
                 retry_delay = min(retry_delay * 2, 2.0)
 
     def __init__(self):
-        self.history_file = resolve_project_path("cfg", "match_history.csv")
+        self.history_file = __import__("utils").account_data_root() / "measured_match_history.csv"
         
         self.current_trophies = None
+        self.trophies_confirmed = False
+        self.pending_trophy_match = None
         self.current_wins = None
         self.match_history = self.load_history()
         self.last_sent_index = len(self.match_history)
@@ -257,7 +259,7 @@ class TrophyObserver:
 
         Without this every restart starts blind: no baseline for the drift guard,
         no anchor for the reader, and a rate that has to refill its whole
-        history before it can say anything. The value is only a hint — it still
+        history before it can say anything. The value is only a hint вЂ” it still
         has to survive the same plausibility checks before it is believed.
         """
         try:
@@ -495,47 +497,14 @@ class TrophyObserver:
             )
 
     def add_trophies(self, parsed_result: ParsedGameResult, current_brawler, playstyle_info, underdog, power_level=None):
-        if self.current_trophies is None:
-            self.current_trophies = 0
-        old_trophies = self.current_trophies
-        if old_trophies >= 2000:
-            underdog = False
-        old_win_streak = self.win_streak
-
+        old_trophies = self.current_trophies if self.trophies_confirmed else None
+        trophy_delta = None
         if parsed_result.result == MatchResult.VICTORY:
             self.win_streak += 1
-            if parsed_result.place is not None:
-                trophy_delta = self.calc_showdown_delta(parsed_result.place)
-            else:
-                trophy_delta = self.calc_win_increment(underdog)
-        elif parsed_result.result == MatchResult.DEFEAT:
-            if not underdog:
-                self.win_streak = 0
-            if parsed_result.place is not None:
-                trophy_delta = self.calc_showdown_delta(parsed_result.place)
-            else:
-                trophy_delta = -self.calc_lost_decrement(underdog)
-        elif parsed_result.result == MatchResult.DRAW:
-            if parsed_result.place is not None:
-                trophy_delta = self.calc_showdown_delta(parsed_result.place)
-            else:
-                print("Nothing changed. Draw detected")
-                trophy_delta = self.calc_draw_increment(underdog)
-        else:
-            print("Catastrophic failure")
-            trophy_delta = 0
-        if self.current_trophies >= 1000 and self.current_trophies + trophy_delta < 1000:
-            self.current_trophies = 1000
-        elif self.current_trophies >= 2000 and self.current_trophies + trophy_delta < 2000:
-            self.current_trophies = 2000
-        else:
-            self.current_trophies += trophy_delta
-
-        print(f"Trophies: {old_trophies} -> {self.current_trophies}")
-        print(f"Win Streak: {old_win_streak} -> {self.win_streak}")
-        self.record_trophy_sample()
-        if self.current_wins:
-            print(f"Current Wins: {self.current_wins}")
+        elif parsed_result.result == MatchResult.DEFEAT and not underdog:
+            self.win_streak = 0
+        self.trophies_confirmed = False
+        print("Trophies pending: waiting for the actual lobby counter")
 
         info = playstyle_info if isinstance(playstyle_info, dict) else {}
         self.match_history.append({
@@ -552,9 +521,8 @@ class TrophyObserver:
             "xlambot_version": XLAMBOT_VERSION,
             "power_level": power_level if power_level is not None else -1,
         })
+        self.pending_trophy_match = self.match_history[-1]
         self.match_counter += 1
-        if self.match_counter % 3 == 0:
-            self.send_results_to_api()
         self.save_history()
 
     def add_win(self, parsed_result: ParsedGameResult):
@@ -566,6 +534,20 @@ class TrophyObserver:
     def change_trophies(self, new):
         print(f"Trophies changed from {self.current_trophies} to {new}")
         self.current_trophies = new
+        self.trophies_confirmed = False
+
+    def confirm_trophies(self, new, brawler):
+        pending = self.pending_trophy_match
+        if pending is not None and pending['brawler_name'] == brawler:
+            baseline = pending.get('current_trophies')
+            if isinstance(baseline, int):
+                pending['trophy_delta'] = new - baseline
+            self.pending_trophy_match = None
+            self.save_history()
+            if self.match_counter % 3 == 0:
+                self.send_results_to_api()
+        self.current_trophies = new
+        self.trophies_confirmed = True
         self.record_trophy_sample()
 
     def send_results_to_api(self):

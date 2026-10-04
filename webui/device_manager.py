@@ -350,6 +350,9 @@ class DeviceRuntimeManager:
         from webui.runtime import RuntimeControl
 
         key = device_profiles.sanitize_key(key)
+        import account_roster
+        if account_roster.status(key).get('scanning'):
+            return {'ok': False, 'message': 'Дождись завершения обновления бойцов.'}
         serial = self.resolve_serial(key, serial)
         runtime = self._runtime_for(key, serial)
         if runtime.is_running and runtime.get_status()["state"] == "stopping":
@@ -553,7 +556,7 @@ class DeviceRuntimeManager:
                                queue[0])
                 data["push_type"] = current.get("type")
                 data["push_until"] = current.get("push_until")
-                data["trophies"] = getattr(observer, "current_trophies", None)
+                data["trophies"] = getattr(observer, "current_trophies", None) if getattr(observer, "trophies_confirmed", False) else None
                 data["wins"] = getattr(observer, "current_wins", None)
                 data["win_streak"] = getattr(observer, "win_streak", None)
                 try:
@@ -628,20 +631,25 @@ class DeviceRuntimeManager:
             # Exactly where TrophyObserver writes. Resolving this through the
             # device profile picked up a leftover copy from a previous day and
             # reported a week-old average as if it were live.
-            path = resolve_project_path("cfg", "match_history.csv")
+            with device_profiles.use_profile(key):
+                path = __import__('utils').account_data_root() / 'measured_match_history.csv'
             if not path.is_file():
                 return None
             deltas = []
+            last = None
             with path.open("r", encoding="utf-8", newline="") as handle:
                 for record in csv.DictReader(handle):
                     try:
-                        deltas.append(int(record.get("trophy_delta") or ""))
+                        last = int(record.get("trophy_delta") or "")
+                        deltas.append(last)
                     except (TypeError, ValueError):
+                        last = None
                         continue
             if not deltas:
                 return None
             recent = deltas[-limit:]
             return {
+                "last": last,
                 "mean": round(statistics.mean(recent), 1),
                 "median": statistics.median(recent),
                 "count": len(recent),

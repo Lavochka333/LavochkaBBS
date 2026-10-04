@@ -4,6 +4,7 @@ import io
 import math
 import os
 import random
+import re
 import threading
 import time
 from contextlib import contextmanager
@@ -212,7 +213,7 @@ def count_mask_pixels(mask, x1, y1, x2, y2):
         return 0
     return cv2.countNonZero(mask[y1:y2, x1:x2])
 
-def brawler_queue_path() -> Path:
+def brawler_queue_path(for_write=False) -> Path:
     """Where the brawler queue lives.
 
     With one device that is the project root. Inside a device profile the queue
@@ -228,7 +229,7 @@ def brawler_queue_path() -> Path:
     root = get_config_root()
     if root != resolve_project_path("cfg"):
         own = root.parent / "latest_brawler_data.json"
-        if own.is_file():
+        if own.is_file() or for_write:
             return own
     return resolve_project_path("latest_brawler_data.json")
 
@@ -243,8 +244,22 @@ def account_state_path() -> Path:
     """
     root = get_config_root()
     if root != resolve_project_path("cfg"):
-        return root.parent / "account_state.json"
+        return account_data_root() / "account_state.json"
     return resolve_project_path("account_state.json")
+
+
+def account_data_root():
+    """Store measurements under the currently identified game account."""
+    root = get_config_root().parent
+    try:
+        tag = json.loads((root / 'active_account.json').read_text(encoding='utf-8'))['tag']
+        if not re.fullmatch(r'[A-Z0-9]{5,14}', tag):
+            raise ValueError('Invalid account tag')
+        root = root / 'accounts' / tag
+    except (OSError, ValueError, KeyError):
+        root = get_config_root()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def read_text_auto(path, errors="replace"):
@@ -270,7 +285,7 @@ def save_brawler_data(data):
     """
     Save the given data to a json file. As a list of dictionaries.
     """
-    queue_path = brawler_queue_path()
+    queue_path = brawler_queue_path(for_write=True)
     with open(queue_path, 'w', encoding='utf-8') as f:
         json.dump(clean_queue(data), f, indent=4)
 
@@ -423,7 +438,19 @@ def _with_brawler_aliases(info):
 def load_brawlers_info():
     if os.path.exists(brawlers_info_file_path):
         with open(brawlers_info_file_path, 'r') as f:
-            return _with_brawler_aliases(json.load(f))
+            info = _with_brawler_aliases(json.load(f))
+        try:
+            roster = json.loads((account_data_root() / 'roster.json').read_text(encoding='utf-8'))
+            for row in roster.get('brawlers', []):
+                name = row['name']
+                if name not in info:
+                    info[name] = {'actual_name': name, 'safe_range': 300, 'attack_range': 500,
+                                  'super_type': 'damage', 'super_range': 500,
+                                  'ignore_walls_for_attacks': False, 'ignore_walls_for_supers': False,
+                                  'hold_attack': 0}
+        except (OSError, ValueError, KeyError):
+            pass
+        return info
     else:
         return {}
 

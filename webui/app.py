@@ -223,6 +223,19 @@ def create_app(xlambot_main, start_discord_bot=False):
     def device_brawlers():
         return jsonify({"ok": True, "brawlers": data_service.get_brawler_catalog()})
 
+    @app.get("/api/devices/<path:key>/roster")
+    def device_roster(key):
+        import account_roster
+        return jsonify({"ok": True, **account_roster.status(device_profiles.sanitize_key(key))})
+
+    @app.post("/api/devices/<path:key>/roster")
+    def device_scan_roster(key):
+        import account_roster
+        if device_manager.get_status(key).get("is_running"):
+            return jsonify({"ok": False, "message": "Останови бота перед обновлением бойцов."}), 409
+        account_roster.start_scan(key)
+        return jsonify({"ok": True, **account_roster.status(device_profiles.sanitize_key(key))})
+
     @app.get("/api/devices/modes")
     def device_modes():
         from lobby_automation import LobbyAutomation
@@ -355,6 +368,10 @@ def create_app(xlambot_main, start_discord_bot=False):
         items = payload.get("items")
         if not isinstance(items, list):
             raise KeyError("A list of queue items is required.")
+        import account_roster
+        owned = {b['name'] for b in account_roster.load(key).get('brawlers', [])}
+        if any(item.get('brawler') not in owned for item in items):
+            return jsonify({"ok": False, "message": "Обнови бойцов аккаунта и выбирай только открытых."}), 400
         device_profiles.save_queue(key, items)
         return jsonify({"ok": True, "items": device_profiles.load_queue(key)})
 

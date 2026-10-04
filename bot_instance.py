@@ -80,6 +80,20 @@ class BotInstance:
             self.serial = self.window_controller.serial
             self.device_key = self.device_key or self.serial
 
+        if self.device_key:
+            import account_roster
+            self.window_controller.screenshot()
+            try:
+                tag, count = account_roster.identify(self.window_controller)
+                cached = account_roster.load(self.device_key)
+                if cached.get('tag') != tag:
+                    raise ValueError('Аккаунт изменился. Обнови бойцов аккаунта в панели.')
+                owned = {b['name'] for b in cached.get('brawlers', [])}
+                if any(row.get('brawler') not in owned for row in queue_data):
+                    raise ValueError('Выбери открытого бойца этого аккаунта в панели.')
+            except Exception:
+                self.window_controller.close()
+                raise
         data = clean_queue(queue_data)
         data = apply_play_order(data)
         if not data:

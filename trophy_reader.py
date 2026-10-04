@@ -128,6 +128,16 @@ def available() -> bool:
     return OCR_AVAILABLE
 
 
+def read_confirmed_lobby(frame):
+    """Read only the digits next to the selected fighter's trophy icon."""
+    crop = _crop(frame, (958, 155, 110, 45))
+    if not OCR_AVAILABLE or crop is None:
+        return None
+    grey = cv2.resize(cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY), None, fx=4, fy=4)
+    text = pytesseract.image_to_string(grey, config=OCR_CONFIG).strip()
+    return int(text) if re.fullmatch(r'\d{1,5}', text) else None
+
+
 def _digits(text: str):
     match = re.search(r"\d{1,7}", str(text).replace(" ", ""))
     if not match:
@@ -180,7 +190,7 @@ def read_account_total(frame, expected=None):
     candidates = []
     for region in ACCOUNT_TOTAL_REGIONS:
         value = _read_region_digits(frame, region)
-        if value is not None and 1000 <= value <= 999999:
+        if value is not None and 0 <= value <= 999999:
             candidates.append(value)
     if not candidates:
         return None
@@ -245,7 +255,7 @@ def _completions(values, expected):
         for missing in (1, 2, 3):
             for prefix in range(1, 10 ** missing):
                 candidate = prefix * span + value
-                if 1000 <= candidate <= 999999:
+                if 0 <= candidate <= 999999:
                     out.append(candidate)
     # Prefixing 1, 2 or 3 digits yields the same number more than once.
     return list(dict.fromkeys(out))
