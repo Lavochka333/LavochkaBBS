@@ -10,6 +10,18 @@ from utils import (
 )
 
 
+def selection_snapshot(controller):
+    """Use a fresh full-resolution frame for actions that must be confirmed."""
+    try:
+        import numpy as np
+        frame = np.asarray(controller.device.screenshot())
+        if frame.ndim == 3 and frame.shape[2] == 3:
+            return frame
+    except Exception:
+        pass
+    return controller.screenshot()
+
+
 class LobbyAutomation:
 
     def __init__(self, window_controller):
@@ -352,16 +364,6 @@ class LobbyAutomation:
             if self._should_interrupt(runtime_control, stop_event):
                 print("Brawler selection aborted by user.")
                 return "aborted"
-            self.window_controller.screenshot()
-            current_state = get_latest_state()
-            if current_state == "shop":
-                print("An offer is open; brawler selection cancelled.")
-                return "stuck"
-
-            if current_state != "brawler_selection":
-                print("Latest screenshot is no longer of the lobby, aborting brawler selection...")
-                return "stuck"
-
             self.window_controller.press("brawler_search")
             if self._sleep_interruptible(1, runtime_control, stop_event):
                 print("Brawler selection aborted by user.")
@@ -379,14 +381,14 @@ class LobbyAutomation:
             if not trophy_reader.available():
                 print("Brawler selection requires OCR to verify the search result.")
                 return "failed"
-            frame = self.window_controller.screenshot()
+            frame = selection_snapshot(self.window_controller)
             card = trophy_reader.read_card(frame)
             if normalize_brawler_filename(card.get("brawler") or "") != normalized_brawler:
                 print(f"Search result does not match {brawler_search_name}; selection cancelled.")
                 return "failed"
             if self._sleep_interruptible(0.3, runtime_control, stop_event):
                 return "aborted"
-            check = trophy_reader.read_card(self.window_controller.screenshot())
+            check = trophy_reader.read_card(selection_snapshot(self.window_controller))
             if normalize_brawler_filename(check.get("brawler") or "") != normalized_brawler:
                 return "failed"
             if check.get("trophies") != card.get("trophies"):
@@ -404,8 +406,13 @@ class LobbyAutomation:
             if self._sleep_interruptible(1.5, runtime_control, stop_event):
                 print("Brawler selection aborted by user.")
                 return "aborted"
-            self.window_controller.screenshot()
-            if get_latest_state() != "lobby":
+            from state_finder import is_in_lobby
+            for _ in range(6):
+                if is_in_lobby(selection_snapshot(self.window_controller)):
+                    break
+                if self._sleep_interruptible(.4, runtime_control, stop_event):
+                    return 'aborted'
+            else:
                 return "stuck"
             self._last_picked = {**card, "brawler": normalized_brawler}
             print("Selected brawler ", brawler_search_name)

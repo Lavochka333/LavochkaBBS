@@ -48,7 +48,7 @@ class QueueSelectionTests(unittest.TestCase):
         ns = extract("lobby_automation.py", {"select_brawler"}, {
             "time": types.SimpleNamespace(sleep=lambda _: None),
             "normalize_brawler_filename": normalise,
-            "load_brawlers_info": lambda: {},
+            "selection_snapshot": lambda controller: controller.screenshot(), "load_brawlers_info": lambda: {},
             "load_toml_as_dict": lambda _: {"brawlers_menu": [110, 490], "first_brawler_icon": [550, 300], "select_brawler": [150, 950]},
         }, "LobbyAutomation")
         controller = Mock(width_ratio=1, height_ratio=1)

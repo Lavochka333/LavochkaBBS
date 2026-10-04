@@ -444,7 +444,7 @@ class BotInstance:
                     if select_brawler != "success" and not self.should_stop() and not self.should_pause():
                         self.first_pick_failures += 1
                         if self.first_pick_failures >= 3:
-                            raise BotHalt("Brawler selection could not be confirmed after three attempts. Stop and choose a brawler manually.")
+                            raise BotHalt("Не удалось подтвердить выбор бойца после трёх попыток. Открой главный экран игры и повтори запуск.")
                     if select_brawler in ("aborted", "stuck"):
                         continue
                     if select_brawler != "success":
