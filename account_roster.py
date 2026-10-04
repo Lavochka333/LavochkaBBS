@@ -40,7 +40,7 @@ def _ocr(frame, region, config='--psm 7'):
 def identify(wc):
     from state_finder import is_in_lobby
     if not is_in_lobby(np.asarray(wc.device.screenshot())):
-        raise ValueError('РћС‚РєСЂРѕР№ РіР»Р°РІРЅС‹Р№ СЌРєСЂР°РЅ РёРіСЂС‹ РїРµСЂРµРґ РѕР±РЅРѕРІР»РµРЅРёРµРј Р±РѕР№С†РѕРІ.')
+        raise ValueError('Открой главный экран игры перед обновлением бойцов.')
     wc.click(120, 65, already_include_ratio=False)
     time.sleep(.8)
     try:
@@ -53,12 +53,12 @@ def identify(wc):
             text = _ocr(frame, (.008, .30, .115, .043), '--psm 7 -c tessedit_char_whitelist=#0289PYLQGRJCUV')
             match = re.fullmatch(r'#?([0289PYLQGRJCUV]{5,14})', text.replace(' ', ''))
             if not match:
-                raise ValueError('РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ С‚РµРі Р°РєРєР°СѓРЅС‚Р°. РџРѕРїСЂРѕР±СѓР№ РѕР±РЅРѕРІРёС‚СЊ СЃРЅРѕРІР°.')
+                raise ValueError('Не удалось прочитать тег аккаунта. Попробуй обновить снова.')
             tags.append(match[1])
             count = re.search(r'(\d+)\s*/\s*(\d+)', _ocr(frame, (.79, .385, .17, .045)))
             counts.append(int(count[1]) if count else None)
         if tags[0] != tags[1] or counts[0] != counts[1] or counts[0] is None:
-            raise ValueError('РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґС‚РІРµСЂРґРёС‚СЊ Р°РєРєР°СѓРЅС‚ Рё РєРѕР»РёС‡РµСЃС‚РІРѕ Р±РѕР№С†РѕРІ.')
+            raise ValueError('Не удалось подтвердить аккаунт и количество бойцов.')
         return tags[0], counts[0]
     finally:
         wc.click(84, 45, already_include_ratio=False)
@@ -81,7 +81,7 @@ def scan(key):
             known = load_brawlers_info()
             selector = LobbyAutomation(wc)
             if not selector._open_roster():
-                raise ValueError('РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РєСЂС‹С‚СЊ СЃРїРёСЃРѕРє Р±РѕР№С†РѕРІ.')
+                raise ValueError('Не удалось открыть список бойцов.')
             # Clear any previous in-game search before walking the roster.
             wc.press('brawler_search')
             wc.clear_text()
@@ -112,7 +112,7 @@ def scan(key):
                         value = card['trophies'] if card['trophies'] == check['trophies'] else None
                         found[name] = {'name': name, 'trophies': value}
                 with _lock:
-                    _jobs[key] = {'scanning': True, 'message': f'РќР°Р№РґРµРЅРѕ {len(found)} РёР· {expected} Р±РѕР№С†РѕРІ'}
+                    _jobs[key] = {'scanning': True, 'message': f'Найдено {len(found)} из {expected} бойцов'}
                 unchanged = unchanged + 1 if len(found) == before else 0
                 if len(found) >= expected or unchanged >= 6:
                     break
@@ -130,7 +130,7 @@ def scan(key):
                 result['complete'] = len(found) == expected
             path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
             with _lock:
-                _jobs[key] = {'scanning': False, 'message': f'РћС‚РєСЂС‹С‚С‹С… Р±РѕР№С†РѕРІ: {len(found)} РёР· {expected}.'}
+                _jobs[key] = {'scanning': False, 'message': f'Открытых бойцов: {len(found)} из {expected}.'}
             wc.click(84, 45, already_include_ratio=False)
     except Exception as error:
         with _lock:
@@ -145,6 +145,6 @@ def start_scan(key):
     with _lock:
         if _jobs.get(key, {}).get('scanning'):
             return False
-        _jobs[key] = {'scanning': True, 'message': 'Р§РёС‚Р°СЋ Р°РєРєР°СѓРЅС‚ Рё РѕС‚РєСЂС‹С‚С‹С… Р±РѕР№С†РѕРІвЂ¦'}
+        _jobs[key] = {'scanning': True, 'message': 'Читаю аккаунт и открытых бойцов…'}
     threading.Thread(target=scan, args=(key,), daemon=True).start()
     return True

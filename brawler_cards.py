@@ -139,7 +139,7 @@ def read_card(frame, index, known, discover=False):
         if not re.fullmatch(r'\d{1,5}', digits):
             grey_crop = cv2.resize(cv2.cvtColor(trophy_crop, cv2.COLOR_RGB2GRAY), None, fx=4, fy=4)
             digits = pytesseract.image_to_string(grey_crop, config='--psm 7 -c tessedit_char_whitelist=0123456789').strip()
-    except pytesseract.TesseractError:
+    except (pytesseract.TesseractError, UnicodeDecodeError):
         return result
     result['brawler'] = name
     result['trophies'] = int(digits) if re.fullmatch(r'\d{1,5}', digits) else None

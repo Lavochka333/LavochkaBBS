@@ -574,6 +574,7 @@ def run_bot_instance(discord_bot, queue_data, stop_event=None, runtime_control=N
         return {"ok": code in (0, None), "message": f"xlamBOT exited with code {code}."}
     except Exception as error:
         instance.close()
+        __import__('traceback').print_exc()
         return {"ok": False, "message": str(error)}
     finally:
         try:

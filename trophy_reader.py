@@ -28,6 +28,16 @@ import numpy as np
 try:
     import pytesseract
 
+    def _decode_ocr_error(error_bytes):
+        """Windows can return localized OCR errors in its legacy code page."""
+        try:
+            text = error_bytes.decode('utf-8')
+        except UnicodeDecodeError:
+            text = error_bytes.decode('cp1251', errors='replace')
+        return ' '.join(text.splitlines()).strip()
+
+    pytesseract.pytesseract.get_errors = _decode_ocr_error
+
     # Сначала ищем переносимую копию, которая едет вместе с программой: у
     # установленного пользователя своего Tesseract может не быть, и раньше
     # читать трофеи было просто нечем. Папка vendor лежит рядом с проектом,
