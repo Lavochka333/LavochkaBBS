@@ -48,6 +48,19 @@
         <p>Подключите телефон по USB с включённой отладкой, запустите эмулятор или подключите устройство по TCP выше.</p>
     </div>
 
+    <!-- Подтверждение необратимых действий. Нативный <dialog> сам удерживает
+         фокус и закрывается по Escape, поэтому ловушку фокуса писать не нужно. -->
+    <dialog id="confirmDialog" class="modal">
+        <form method="dialog" class="modal-card">
+            <h3 class="modal-title" id="confirmTitle">Подтвердите действие</h3>
+            <p class="modal-text" id="confirmText">Точно?</p>
+            <div class="modal-actions">
+                <button class="btn" value="cancel">Отмена</button>
+                <button class="btn btn-danger" value="ok" id="confirmOk">Очистить</button>
+            </div>
+        </form>
+    </dialog>
+
     <div id="toast" class="toast hidden"></div>
     <script src="{{ url_for('static', filename='js/panel.js') }}?v={{ asset_version }}"></script>
 </body>

@@ -85,6 +85,22 @@
         toastTimer = setTimeout(() => toastEl.classList.add('hidden'), 4200);
     }
 
+    /* Окно подтверждения на нативном <dialog>: фокус заперт внутри, Escape
+       закрывает, backdrop с размытием рисует сам браузер. Возвращает true,
+       если подтвердили. Пока окно открыто,Escape и клик по фону его закрывают. */
+    function askConfirm({ title, text, okLabel }) {
+        const dialog = document.getElementById('confirmDialog');
+        if (!dialog) return Promise.resolve(window.confirm(text || title));
+        document.getElementById('confirmTitle').textContent = title || 'Подтвердите действие';
+        document.getElementById('confirmText').textContent = text || '';
+        document.getElementById('confirmOk').textContent = okLabel || 'Подтвердить';
+        return new Promise((resolve) => {
+            // close срабатывает и по кнопке, и по Escape, и по клику на фон.
+            dialog.addEventListener('close', () => resolve(dialog.returnValue === 'ok'), { once: true });
+            dialog.showModal();
+        });
+    }
+
     function plural(n) {
         const abs = Math.abs(n) % 100;
         const last = abs % 10;
@@ -763,6 +779,10 @@
         const action = button.dataset.action;
         if (!key) return;
 
+        // Пока запрос уходит, кнопка не берёт повторный клик. Для «Старт» это
+        // ещё и защита от двух ботов на одном устройстве.
+        button.classList.add('is-busy');
+
         try {
             if (action === 'start' || action === 'stop' || action === 'pause' || action === 'resume') {
                 button.disabled = true;
@@ -825,12 +845,25 @@
                 toast(parts.join(' · ') + ' — применится со следующего матча', 'ok');
                 await loadTelemetry();
             } else if (action === 'clear-logs') {
+                // Логи не восстановить, поэтому спрашиваем. Раньше здесь стоял
+                // системный confirm(): выглядел он не как остальная панель.
+                const ok = await askConfirm({
+                    title: 'Очистить логи?',
+                    text: `Логи устройства ${key} будут удалены безвозвратно.`,
+                    okLabel: 'Очистить',
+                });
+                if (!ok) return;
                 await api(`/api/devices/${encodeURIComponent(key)}/logs`, { method: 'DELETE' });
                 lastLogText[key] = [];
                 renderLogs(key, []);
+                toast('Логи очищены', 'ok');
             }
         } catch (error) {
             toast('Ошибка: ' + error.message, 'error');
+        } finally {
+            // Кнопка отпускается в любом случае: и когда запрос прошёл, и когда
+            // упал, и когда пользователь передумал в окне подтверждения.
+            button.classList.remove('is-busy');
         }
     });
 

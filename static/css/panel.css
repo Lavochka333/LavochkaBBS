@@ -740,6 +740,188 @@ select.input {
     .rotate-bar { grid-template-columns: 1fr; }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   Движение, наведение, стекло и отклик кнопок.
+
+   Приёмы подсмотрены на freefrontend.com (css-reveal-animations,
+   css-hover-effects, css-liquid-glass, css-submit-buttons, css-modal-windows)
+   и переписаны под эту панель.
+
+   Два правила, которые здесь важнее самих эффектов:
+
+   1. Анимируются только transform, opacity, clip-path и цвет. Ни ширины, ни
+      высоты, ни top/left: панель перерисовывает статистику каждые две секунды,
+      и любая анимацияlayout- свойства дёргала бы сетку в такт опросу.
+   2. Появление карточек привязано к .device-grid > .device-card, а не к .device-card.
+      Разметка карточек пересобирается только когда меняется состав устройств
+      (подпись cardKeys в panel.js), поэтому каскад проигрывается один раз, а
+      не каждые две секунды. На статистику вовсе не повешено: она перерисовывается
+      на каждом опросе, и анимация на ней мерцала бы постоянно.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+    /* Кривая, которой набраны эффекты ниже: быстрый выход, мягкое торможение. */
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+    --glass-rim: inset 0 1px 0 rgba(255, 255, 255, 0.055),
+                 inset 0 0 0 1px rgba(255, 255, 255, 0.016);
+}
+
+/* ── появление ─────────────────────────────────────────────────────────── */
+
+@keyframes xlam-drop {
+    from { opacity: 0; transform: translateY(-7px); }
+    to { opacity: 1; transform: none; }
+}
+
+@keyframes xlam-rise {
+    from { opacity: 0; transform: translateY(11px); }
+    to { opacity: 1; transform: none; }
+}
+
+/* clip-path вместо изменения высоты: высоту раскрытия знать не нужно,
+   поэтому анимация не вызывает перерасчёт раскладки. */
+@keyframes xlam-unfold {
+    from { opacity: 0; transform: translateY(-7px); clip-path: inset(0 0 100% 0); }
+    to { opacity: 1; transform: none; clip-path: inset(0 0 -6px 0); }
+}
+
+.panel-header { animation: xlam-drop 0.5s var(--ease-out-expo) backwards; }
+.connect-bar { animation: xlam-drop 0.5s var(--ease-out-expo) 0.06s backwards; }
+
+.device-grid > .device-card { animation: xlam-rise 0.52s var(--ease-out-expo) backwards; }
+.device-grid > .device-card:nth-child(1) { animation-delay: 0.02s; }
+.device-grid > .device-card:nth-child(2) { animation-delay: 0.09s; }
+.device-grid > .device-card:nth-child(3) { animation-delay: 0.16s; }
+.device-grid > .device-card:nth-child(4) { animation-delay: 0.23s; }
+.device-grid > .device-card:nth-child(5) { animation-delay: 0.3s; }
+.device-grid > .device-card:nth-child(n + 6) { animation-delay: 0.36s; }
+
+.disclosure[open] > *:not(summary) {
+    animation: xlam-unfold 0.3s var(--ease-out-expo) backwards;
+}
+
+/* ── стекло ──────────────────────────────────────────────────────────────
+   Полное преломление с feDisplacementMap сюда не подошло: преломлять нечего,
+   под карточками ровная тёмная заливка, а backdrop-фильтр на панели, которая
+   перерисовывается каждые две секунды, стоил бы INP. Осталось то, что видно
+   всегда: блик по верхней кромке и мягкий отсвет по нижней. */
+
+.panel-header {
+    box-shadow: var(--glass-rim), inset 0 -1px 0 rgba(255, 255, 255, 0.04),
+                0 12px 28px -18px rgba(0, 0, 0, 0.9);
+}
+
+.connect-bar {
+    box-shadow: var(--glass-rim), 0 8px 20px -16px rgba(0, 0, 0, 0.8);
+}
+
+.device-card {
+    box-shadow: var(--shadow), var(--glass-rim),
+                inset 0 -20px 34px -26px rgba(47, 224, 166, 0.5);
+}
+
+/* ── наведение ─────────────────────────────────────────────────────────── */
+
+.device-card {
+    transition: border-color 0.18s ease, box-shadow 0.22s ease,
+                transform 0.22s var(--ease-out-expo);
+}
+.device-card:hover {
+    transform: translateY(-2px);
+    border-color: #2b3342;
+}
+
+/* Карточка реагирует на кнопку внутри себя: рамка подсказывает, что действие
+   относится к этому устройству, а не ко всей странице. */
+.device-card:has(.btn-primary:hover) { border-color: var(--accent-line); }
+.device-card:has(.btn-danger:hover) { border-color: rgba(255, 95, 109, 0.4); }
+
+.preview-img {
+    transition: transform 0.44s var(--ease-out-expo), filter 0.3s ease;
+}
+.device-card:hover .preview-img { transform: scale(1.032); }
+
+.disclosure > summary { transition: background 0.15s ease, color 0.15s ease, padding-left 0.2s var(--ease-out-expo); }
+.disclosure > summary:hover { padding-left: 12px; }
+
+.queue-item { transition: border-color 0.16s ease, background 0.16s ease, transform 0.18s var(--ease-out-expo); }
+.queue-item:hover { transform: translateX(2px); border-color: #2b3342; }
+
+/* ── кнопки: блик и отклик на нажатие ──────────────────────────────────── */
+
+.btn { position: relative; overflow: hidden; }
+
+.btn::after {
+    content: "";
+    position: absolute;
+    top: -20%;
+    bottom: -20%;
+    left: 0;
+    width: 42%;
+    background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.17), transparent);
+    transform: translateX(-170%) skewX(-20deg);
+    pointer-events: none;
+}
+
+@keyframes xlam-sheen {
+    from { transform: translateX(-170%) skewX(-20deg); }
+    to { transform: translateX(345%) skewX(-20deg); }
+}
+
+.btn:hover:not(:disabled)::after { animation: xlam-sheen 0.62s cubic-bezier(0.22, 0.61, 0.36, 1); }
+.btn:focus-visible::after { animation: none; transform: translateX(345%) skewX(-20deg); }
+
+@keyframes xlam-press {
+    0% { transform: translateY(0); }
+    40% { transform: translateY(2px) scale(0.975); }
+    100% { transform: translateY(0); }
+}
+.btn:active:not(:disabled) { animation: xlam-press 0.26s var(--ease-out-expo); }
+
+/* Пока запрос уходит, кнопка не принимает наведение и повторный клик: два
+   бота на одном устройстве запустить нельзя. */
+.btn.is-busy { pointer-events: none; opacity: 0.72; }
+.btn.is-busy::after { animation: xlam-sheen 1.05s linear infinite; }
+
+/* ── окно подтверждения ────────────────────────────────────────────────────
+   Нативный <dialog>: фокус заперт внутри, Escape закрывает, ::backdrop не
+   требует лишних элементов. */
+
+.modal {
+    width: min(400px, calc(100vw - 32px));
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+    background: linear-gradient(180deg, #14181f 0%, var(--surface) 60px);
+    color: var(--text);
+    box-shadow: var(--shadow), var(--glass-rim), 0 28px 60px -22px rgba(0, 0, 0, 0.9);
+}
+
+.modal::backdrop {
+    background: rgba(6, 8, 12, 0.62);
+    backdrop-filter: blur(7px) saturate(120%);
+}
+
+.modal-card { display: block; padding: 16px 17px 14px; margin: 0; }
+.modal-title { margin: 0 0 6px; font-size: 14.5px; font-weight: 700; letter-spacing: -0.01em; }
+.modal-text { margin: 0 0 15px; color: var(--text-dim); font-size: 12.5px; line-height: 1.5; }
+.modal-actions { display: flex; gap: 7px; justify-content: flex-end; }
+
+/* ── уведомление ──────────────────────────────────────────────────────────
+   Появление задано через @starting-style, потому что класс .hidden меняет
+   display, а на смене display переходы не запускаются. Браузер без поддержки
+   просто покажет уведомление сразу. */
+
+.toast { transition: opacity 0.26s ease, transform 0.34s var(--ease-out-expo); }
+
+@starting-style {
+    .toast:not(.hidden) { opacity: 0; transform: translateY(9px) scale(0.97); }
+}
+
 @media (prefers-reduced-motion: reduce) {
     * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+
+    /* Задержку тоже обнуляем. Иначе карточки с анимацией backwards успеют
+       отрисоваться в начальном кадре и останутся невидимыми. */
+    * { animation-delay: 0s !important; }
 }
