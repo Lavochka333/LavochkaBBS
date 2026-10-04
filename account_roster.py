@@ -37,12 +37,26 @@ def _ocr(frame, region, config='--psm 7'):
     return pytesseract.image_to_string(cv2.resize(cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY), None, fx=3, fy=3), config=config).strip()
 
 
+def profile_details(frame):
+    count = re.search(r'(\d+)\s*/\s*(\d+)', _ocr(frame, (.79, .385, .17, .045)))
+    if not count:
+        return None
+    text = _ocr(frame, (.005, .30, .12, .043), '--psm 7 -c tessedit_char_whitelist=#0289PYLQGRJCUV')
+    match = re.fullmatch(r'#([0289PYLQGRJCUV]{5,14})', text.replace(' ', ''))
+    if not match:
+        raise ValueError('Не удалось прочитать тег аккаунта. Попробуй обновить снова.')
+    return match[1], int(count[1])
+
+
 def identify(wc):
     from state_finder import is_in_lobby
-    if not is_in_lobby(np.asarray(wc.device.screenshot())):
+    initial = np.asarray(wc.device.screenshot())
+    already_profile = profile_details(initial)
+    if not already_profile and not is_in_lobby(initial):
         raise ValueError('Открой главный экран игры перед обновлением бойцов.')
-    wc.click(120, 65, already_include_ratio=False)
-    time.sleep(.8)
+    if not already_profile:
+        wc.click(120, 65, already_include_ratio=False)
+        time.sleep(.8)
     try:
         frames = [np.asarray(wc.device.screenshot())]
         time.sleep(.25)
@@ -50,13 +64,11 @@ def identify(wc):
         tags = []
         counts = []
         for frame in frames:
-            text = _ocr(frame, (.008, .30, .115, .043), '--psm 7 -c tessedit_char_whitelist=#0289PYLQGRJCUV')
-            match = re.fullmatch(r'#?([0289PYLQGRJCUV]{5,14})', text.replace(' ', ''))
-            if not match:
-                raise ValueError('Не удалось прочитать тег аккаунта. Попробуй обновить снова.')
-            tags.append(match[1])
-            count = re.search(r'(\d+)\s*/\s*(\d+)', _ocr(frame, (.79, .385, .17, .045)))
-            counts.append(int(count[1]) if count else None)
+            details = profile_details(frame)
+            if not details:
+                raise ValueError('Не удалось открыть профиль аккаунта.')
+            tags.append(details[0])
+            counts.append(details[1])
         if tags[0] != tags[1] or counts[0] != counts[1] or counts[0] is None:
             raise ValueError('Не удалось подтвердить аккаунт и количество бойцов.')
         return tags[0], counts[0]
