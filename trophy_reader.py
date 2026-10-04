@@ -294,10 +294,8 @@ def read_card(frame, card_index=0):
     result = {"brawler": None, "trophies": None}
     if not OCR_AVAILABLE or frame is None or frame.size == 0:
         return result
-    result["brawler"] = _read_card_name(frame, card_index)
-    result["trophies"] = _read_region_digits(
-        frame, shifted(FIRST_CARD_TROPHY_REGION, card_index))
-    return result
+    from brawler_cards import read_card as read_visible_card
+    return read_visible_card(frame, card_index, _known_brawler_names())
 
 
 def read_first_card(frame, card_index=0):
@@ -344,6 +342,8 @@ def _match_brawler_name(squashed, known):
     """Find the brawler whose name this OCR text is meant to be."""
     if not squashed:
         return None
+    if len(squashed) < 3:
+        return next((name for name in known if squashed == name.upper()), None)
     normalised = sorted(
         ((re.sub(r"[^A-Z0-9]", "", name.upper()), name) for name in known),
         key=lambda pair: -len(pair[0]),
@@ -359,7 +359,7 @@ def _match_brawler_name(squashed, known):
         if abs(len(candidate) - len(squashed)) > NAME_MAX_DISTANCE:
             continue
         distance = _levenshtein(candidate, squashed)
-        if distance <= NAME_MAX_DISTANCE and (best is None or distance < best[0]):
+        if len(candidate) >= 5 and distance <= 1 and (best is None or distance < best[0]):
             best = (distance, name)
     return best[1] if best else None
 

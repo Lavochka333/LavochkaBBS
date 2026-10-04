@@ -168,5 +168,10 @@ function Build-Installer {
 
 # ── main ────────────────────────────────────────────────────────────────────
 Ensure-Tesseract
+$russianModel = Join-Path $ProjectRoot 'vendor\tesseract\tessdata\rus.traineddata'
+if (-not (Test-Path -LiteralPath $russianModel)) {
+    Write-Step 'Добавляю русский язык распознавания бойцов'
+    Invoke-WebRequest 'https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/rus.traineddata' -OutFile $russianModel
+}
 if (-not $InstallerOnly) { Build-App }
 Build-Installer

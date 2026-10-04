@@ -123,6 +123,7 @@ class BotInstance:
         self.start_state_checker()
         print(f"[{self.device_label}] Initialization complete, starting main loop.")
         self.picked_first_brawler = False
+        self.first_pick_failures = 0
         self._connection_lost_handled = 0.0
         self.time_since_checked_if_brawl_stars_crashed = time.time()
         self.check_if_brawl_stars_crashed_timer = load_toml_as_dict("cfg/time_tresholds.toml")["check_if_brawl_stars_crashed"]
@@ -426,6 +427,10 @@ class BotInstance:
 
                     # "aborted" means a stop, "stuck" means the screen is no
                     # longer the brawler menu. Neither is a reason to press on.
+                    if select_brawler != "success" and not self.should_stop() and not self.should_pause():
+                        self.first_pick_failures += 1
+                        if self.first_pick_failures >= 3:
+                            raise BotHalt("Brawler selection could not be confirmed after three attempts. Stop and choose a brawler manually.")
                     if select_brawler in ("aborted", "stuck"):
                         continue
                     if select_brawler != "success":

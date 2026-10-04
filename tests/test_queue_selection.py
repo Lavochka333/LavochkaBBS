@@ -54,18 +54,55 @@ class QueueSelectionTests(unittest.TestCase):
         controller = Mock(width_ratio=1, height_ratio=1)
         controller.type_text.return_value = True
         selector = types.SimpleNamespace(window_controller=controller,
-            _should_interrupt=lambda *args: False, _sleep_interruptible=lambda *args: False)
+            _should_interrupt=lambda *args: False, _sleep_interruptible=lambda *args: False, _open_roster=lambda *args: True)
         reader = types.SimpleNamespace(available=lambda: True, read_card=lambda _: {"brawler": "bull", "trophies": 2000})
         with patch.dict(sys.modules, {"trophy_reader": reader}):
             result = ns["select_brawler"](selector, "shelly", lambda: "brawler_selection")
         self.assertEqual(result, "failed")
-        self.assertEqual(controller.click.call_count, 1)  # Only opening the menu.
+        self.assertEqual(controller.click.call_count, 0)  # Search result was never tapped.
         self.assertIsNone(selector._last_picked)
 
     def test_zero_trophies_are_a_valid_measurement(self):
         ns = extract("trophy_reader.py", {"_digits"}, {"re": re})
         self.assertEqual(ns["_digits"]("0"), 0)
         self.assertIsNone(ns["_digits"]("unreadable"))
+
+    def test_ocr_noise_is_not_a_character_name(self):
+        ns = extract("trophy_reader.py", {"_match_brawler_name", "_levenshtein"},
+                     {"re": re, "NAME_MAX_DISTANCE": 2})
+        for noise in ("AAA", "1", "I"):
+            self.assertIsNone(ns["_match_brawler_name"](noise, ["tara", "bo", "kit"]))
+
+    def test_russian_labels_and_short_noise(self):
+        ns = extract("brawler_cards.py", {"letters", "match_name"},
+                     {"re": re, "RUSSIAN_NAMES": {"эльпримо": "elprimo", "бо": "bo"}})
+        known = ["elprimo", "tara", "bo", "kit", "jacky"]
+        self.assertEqual(ns["match_name"]("ЭЛЬ ПРИМО", known), "elprimo")
+        self.assertEqual(ns["match_name"]("IACKY", known), "jacky")
+        for noise in ("AAA", "1", "I", "UNLOCKING BRAWLER"):
+            self.assertIsNone(ns["match_name"](noise, known))
+
+    def test_large_unlock_offer_is_not_a_card(self):
+        import cv2
+        import numpy as np
+        from brawler_cards import card_boxes
+        frame = np.full((900, 1600, 3), (255, 80, 10), dtype=np.uint8)
+        cv2.rectangle(frame, (150, 140), (620, 840), (0, 0, 0), 5)
+        cv2.rectangle(frame, (780, 140), (1140, 370), (0, 0, 0), 5)
+        boxes = card_boxes(frame)
+        self.assertEqual(len(boxes), 1)
+        self.assertGreater(boxes[0][0], 700)
+
+    def test_already_open_roster_does_not_tap_the_unlock_offer(self):
+        ns = extract("lobby_automation.py", {"_open_roster"}, {}, "LobbyAutomation")
+        controller = Mock()
+        selector = types.SimpleNamespace(window_controller=controller)
+        with patch.dict(sys.modules, {
+            "brawler_cards": types.SimpleNamespace(card_boxes=lambda _: [(780, 140, 360, 230)]),
+            "state_finder": types.SimpleNamespace(is_in_lobby=lambda _: False, is_in_brawler_selection=lambda _: True),
+        }):
+            self.assertTrue(ns["_open_roster"](selector))
+        controller.click.assert_not_called()
 
     def test_confirmed_card_can_repair_corrupt_saved_trophies(self):
         ns = extract("stage_manager.py", {"_adopt_picked_brawler"}, {}, "StageManager")

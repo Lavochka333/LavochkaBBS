@@ -2,6 +2,21 @@
 setlocal
 cd /d "%~dp0"
 
+if exist "dist\current\xlamBOT\xlamBOT.exe" (
+    start "" "dist\current\xlamBOT\xlamBOT.exe"
+    exit /b 0
+)
+
+if exist "dist\repaired\xlamBOT\xlamBOT.exe" (
+    start "" "dist\repaired\xlamBOT\xlamBOT.exe"
+    exit /b 0
+)
+
+if exist "dist\xlamBOT\xlamBOT.exe" (
+    start "" "dist\xlamBOT\xlamBOT.exe"
+    exit /b 0
+)
+
 if exist ".venv\Scripts\python.exe" goto dependencies
 
 py -3.11 -c "import sys; assert sys.version_info[:2] == (3, 11)" >nul 2>&1

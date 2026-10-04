@@ -136,6 +136,27 @@ class LobbyAutomation:
         self._brawler_names_cache = names
         return names
 
+    def _open_roster(self, runtime_control=None, stop_event=None):
+        from brawler_cards import card_boxes
+        from state_finder import is_in_lobby, is_in_brawler_selection
+        frame = self.window_controller.screenshot()
+        if card_boxes(frame) or is_in_brawler_selection(frame):
+            return True
+        # A cached lobby state may belong to the frame before the menu opened.
+        # On the roster, the lobby's BRAWLERS button coordinates hit an offer.
+        if not is_in_lobby(frame):
+            return False
+        point = self._button_coordinates().get("brawlers_menu")
+        if not point:
+            return False
+        self.window_controller.click(*point, already_include_ratio=False)
+        for _ in range(4):
+            if self._sleep_interruptible(.5, runtime_control, stop_event):
+                return False
+            if card_boxes(self.window_controller.screenshot()):
+                return True
+        return False
+
     def select_brawler_by_sort(self, get_latest_state, stop_event=None,
                               runtime_control=None, sort_point=None,
                               card_index=0):
@@ -174,32 +195,8 @@ class LobbyAutomation:
             print("Brawler sorting coordinates are missing from buttons_config.toml.")
             return "error"
 
-        self.window_controller.screenshot()
-        if get_latest_state() != "lobby":
-            print(f"Not in the lobby (state '{get_latest_state()}'), not changing brawler.")
+        if not self._open_roster(runtime_control, stop_event):
             return "stuck"
-
-        # A single tap can be swallowed: a popup may still be fading, or the
-        # lobby may not have finished settling. Retrying a few times is what
-        # makes this reliable enough to run unattended.
-        opened = False
-        for attempt in range(3):
-            if self._sleep_interruptible(0.5, runtime_control, stop_event):
-                return "aborted"
-            self.window_controller.click(open_menu[0], open_menu[1], already_include_ratio=False)
-            if self._sleep_interruptible(1.5, runtime_control, stop_event):
-                return "aborted"
-            self.window_controller.screenshot()
-            if get_latest_state() == "brawler_selection":
-                opened = True
-                break
-            print(f"Brawler menu did not open on attempt {attempt + 1}, "
-                  f"state is '{get_latest_state()}'")
-        if not opened:
-            print("Brawler menu would not open; treating the switch as failed so "
-                  "it is retried on the next lobby tick instead of costing a "
-                  "whole quota.")
-            return "error"
 
         if get_latest_state() == "connection_lost":
             print("Connection lost dialog is up over the brawler menu; not "
@@ -307,6 +304,9 @@ class LobbyAutomation:
             return "failed"
         if check.get("trophies") != self._last_picked.get("trophies"):
             self._last_picked["trophies"] = None
+        first_card = self._last_picked.get("click")
+        if not first_card:
+            return "failed"
         self.window_controller.click(first_card[0], first_card[1], already_include_ratio=False)
         if self._sleep_interruptible(1.2, runtime_control, stop_event):
             return "aborted"
@@ -345,20 +345,18 @@ class LobbyAutomation:
         brawler_info = load_brawlers_info().get(normalized_brawler, {})
         brawler_search_name = brawler_info.get("actual_name") or normalized_brawler
 
-        x, y = load_toml_as_dict("cfg/buttons_config.toml")["brawlers_menu"]
-        self.window_controller.click(x, y, already_include_ratio=False)
-        time.sleep(1.25)
+        if not self._open_roster(runtime_control, stop_event):
+            return "stuck"
         print("Automatic brawler selection started for", brawler_search_name)
-        for i in range(100):
+        for i in range(5):
             if self._should_interrupt(runtime_control, stop_event):
                 print("Brawler selection aborted by user.")
                 return "aborted"
             self.window_controller.screenshot()
             current_state = get_latest_state()
             if current_state == "shop":
-                print("Brawler menu is still opening")
-                time.sleep(1)
-                continue
+                print("An offer is open; brawler selection cancelled.")
+                return "stuck"
 
             if current_state != "brawler_selection":
                 print("Latest screenshot is no longer of the lobby, aborting brawler selection...")
@@ -369,7 +367,7 @@ class LobbyAutomation:
                 print("Brawler selection aborted by user.")
                 return "aborted"
 
-            if not self.window_controller.type_text(brawler_search_name):
+            if not self.window_controller.clear_text() or not self.window_controller.type_text(brawler_search_name):
                 print(f"Could not enter brawler name '{brawler_search_name}' in the search field.")
                 return "error"
             if self._sleep_interruptible(0.5, runtime_control, stop_event):
@@ -393,7 +391,10 @@ class LobbyAutomation:
                 return "failed"
             if check.get("trophies") != card.get("trophies"):
                 card["trophies"] = None
-            self.window_controller.click(first_brawler_x, first_brawler_y, already_include_ratio=False)
+            point = card.get("click")
+            if not point:
+                return "failed"
+            self.window_controller.click(point[0], point[1], already_include_ratio=False)
             if self._sleep_interruptible(1, runtime_control, stop_event):
                 print("Brawler selection aborted by user.")
                 return "aborted"

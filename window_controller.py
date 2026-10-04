@@ -537,6 +537,16 @@ class WindowController:
         target_y = y * self.height_ratio
         self.click(target_x, target_y, delay, touch_up=touch_up, touch_down=touch_down)
 
+    def clear_text(self) -> bool:
+        """Clear the focused search field before entering another brawler."""
+        try:
+            self.device.shell(["input", "keycombination", "113", "29"], timeout=5)
+            self.device.shell(["input", "keyevent", "67"], timeout=5)
+            return True
+        except Exception as error:
+            print(f"Could not clear the search field: {error}")
+            return False
+
     def type_text(self, text: str) -> bool:
         """Type ASCII text into the currently focused Android input field."""
         text = str(text)
