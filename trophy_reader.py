@@ -133,7 +133,7 @@ def _digits(text: str):
     if not match:
         return None
     value = int(match.group())
-    return value if value > 0 else None
+    return value
 
 
 def read(frame, region=DEFAULT_REGION) -> int | None:

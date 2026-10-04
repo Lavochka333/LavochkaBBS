@@ -120,6 +120,8 @@ class StageManager:
 
     def _switch_after_games(self):
         """How many games to spend on one brawler; 0 disables the rotation."""
+        if self.brawler_sort_mode() == "selected":
+            return 0
         raw = load_toml_as_dict("./cfg/bot_config.toml").get("brawler_switch_after_games", 7)
         try:
             return max(0, int(raw))
@@ -159,7 +161,7 @@ class StageManager:
         raw = load_toml_as_dict("./cfg/bot_config.toml").get("brawler_pick_mode",
                                                             "lowest_trophies")
         mode = str(raw or "").strip().lower()
-        return mode if mode in self.BRAWLER_SORT_MODES else "lowest_trophies"
+        return mode if mode in self.BRAWLER_SORT_MODES or mode == "selected" else "lowest_trophies"
 
     def brawler_sort_point(self):
         """The menu entry to tap for the current mode."""
@@ -260,24 +262,11 @@ class StageManager:
                      "automatically_pick": True}
             self.brawlers_pick_data.append(entry)
             print(f"{name} was not in the queue, added it so the panel shows the truth.")
-        # The trophy number on the card is read by OCR and sometimes arrives with
-        # its leading digits gone: 72 for 720, 12 for 727. Writing that into the
-        # queue would make the brawler look like the lowest one on the roster and
-        # the game would keep handing us the same pick. A single match moves a
-        # brawler by tens, so a read this far from what we last believed is a
-        # misread, and the previous value stands.
-        trusted = trophies
-        if trophies and entry.get("trophies"):
-            previous_trophies = int(entry["trophies"] or 0)
-            drift = abs(trophies - previous_trophies)
-            if drift > max(200, previous_trophies // 3):
-                trusted = None
-                print(f"Card trophy read {trophies} for {name} is too far from the "
-                      f"{previous_trophies} we had; keeping the old value rather "
-                      f"than writing a truncated number into the queue.")
-        if trusted:
-            entry["trophies"] = trusted
-            self.Trophy_observer.change_trophies(trusted)
+        # The selector verifies repeated card readings. A confirmed measurement
+        # must be allowed to repair an older corrupt saved count.
+        if trophies is not None:
+            entry["trophies"] = trophies
+            self.Trophy_observer.change_trophies(trophies)
         self.brawlers_pick_data.remove(entry)
         self.brawlers_pick_data.insert(0, entry)
         self.Trophy_observer.current_wins = entry["wins"] if entry["wins"] != "" else 0
@@ -307,29 +296,9 @@ class StageManager:
                 self.Trophy_observer.record_account_total(total)
         except Exception:  # noqa: BLE001
             pass
-        real = trophy_reader.read(frame)
-        if real is None:
-            return real
-        name = self.current_brawler()
-        if not name:
-            return real
-        stored = None
-        for entry in self.brawlers_pick_data:
-            if str(entry.get("brawler", "")).lower() == str(name).lower():
-                stored = self._entry_trophies(entry)
-                break
-        if stored is None:
-            entry = {"brawler": name, "type": "trophies", "push_until": 1000,
-                     "trophies": real, "wins": 0, "win_streak": 0,
-                     "automatically_pick": True}
-            self.brawlers_pick_data.insert(0, entry)
-            print(f"Playing {name}, which was not in the queue; added it at {real} trophies.")
-            return real
-        if abs(real - stored) > 5:
-            print(f"Trophies read from the lobby: {real} (last known {stored}) "
-                  f"for {name}. Display only; nothing decides on it.")
-            entry["trophies"] = real
-        return real
+        # The lobby crop can include prestige progress rather than trophies.
+        # Per-brawler counts are updated only from the selected card.
+        return None
 
     def rotate_to_lowest_trophies(self):
         """Move the brawler with the fewest trophies to the front of the queue."""

@@ -269,7 +269,7 @@ class WebDataService:
         names = get_brawler_list()
         if not names:
             names = list(load_brawlers_info().keys())
-        return sorted({name for name in names if name})
+        return sorted({normalize_brawler_filename(name) for name in names if name})
 
     def get_brawler_catalog(self) -> list[dict[str, Any]]:
         return [

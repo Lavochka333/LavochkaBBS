@@ -415,9 +415,14 @@ class BotInstance:
                         if self.sleep_interruptible(2) == "stop":
                             self.stop_gracefully()
                             break
-                        select_brawler = self.lobby_automator.select_brawler_by_sort(
-                            self.get_latest_state, runtime_control=self.runtime_control,
-                            sort_point=self.Stage_manager.brawler_sort_point())
+                        if self.Stage_manager._pick_lowest_trophies():
+                            select_brawler = self.lobby_automator.select_brawler_by_sort(
+                                self.get_latest_state, runtime_control=self.runtime_control,
+                                sort_point=self.Stage_manager.brawler_sort_point())
+                        else:
+                            select_brawler = self.lobby_automator.select_brawler(
+                                next_brawler_name, self.get_latest_state,
+                                runtime_control=self.runtime_control)
 
                     # "aborted" means a stop, "stuck" means the screen is no
                     # longer the brawler menu. Neither is a reason to press on.

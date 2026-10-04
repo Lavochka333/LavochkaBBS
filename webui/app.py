@@ -349,6 +349,8 @@ def create_app(xlambot_main, start_discord_bot=False):
 
     @app.post("/api/devices/<path:key>/queue")
     def device_queue_save(key: str):
+        if device_manager.get_status(key).get("is_running"):
+            return jsonify({"ok": False, "message": "Stop the bot before editing its queue."}), 409
         payload = request.get_json(silent=True) or {}
         items = payload.get("items")
         if not isinstance(items, list):

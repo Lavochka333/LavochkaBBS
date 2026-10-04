@@ -254,12 +254,12 @@ class LobbyAutomation:
                     if frame is None:
                         continue
                     card = trophy_reader.read_card(frame, card_index=index)
-                    name = str(card.get("brawler") or "").strip().lower()
+                    name = normalize_brawler_filename(card.get("brawler") or "")
                     # A read is only believed if the name is a brawler that
                     # exists. Anything else is OCR noise, and acting on it would
                     # write a brawler nobody has into the queue.
-                    if name and (not known or name in known):
-                        self._last_picked = card
+                    if name in known:
+                        self._last_picked = {**card, "brawler": name}
                         print(f"First card under the {sort_label} sort reads as "
                               f"{card['brawler']} with {card.get('trophies')} trophies.")
                         break
@@ -275,6 +275,38 @@ class LobbyAutomation:
         except Exception as error:  # noqa: BLE001
             print(f"Reading the lowest-trophy card failed: {error}")
 
+        if not self._last_picked or not self._last_picked.get("brawler"):
+            # Some accounts show an unlock offer in the first grid column.
+            # Search other visible slots without tapping an unidentified card.
+            import trophy_reader
+            if trophy_reader.available():
+                for candidate in range(index + 1, 9):
+                    if self._should_interrupt(runtime_control, stop_event):
+                        return "aborted"
+                    point = buttons.get(f"brawlers_card_{candidate:02d}")
+                    if not point:
+                        continue
+                    frame = self.window_controller.screenshot()
+                    card = trophy_reader.read_card(frame, card_index=candidate)
+                    name = normalize_brawler_filename(card.get("brawler") or "")
+                    if name in self._known_brawler_names():
+                        self._last_picked = {**card, "brawler": name}
+                        first_card = point
+                        index = candidate
+                        break
+            if not self._last_picked:
+                print("No recognised brawler card; refusing to tap a possible unlock offer.")
+                return "failed"
+        # Accept a trophy count only when two readings of this card agree.
+        import trophy_reader
+        if self._sleep_interruptible(0.3, runtime_control, stop_event):
+            return "aborted"
+        check = trophy_reader.read_card(self.window_controller.screenshot(), card_index=index)
+        if normalize_brawler_filename(check.get("brawler") or "") != self._last_picked["brawler"]:
+            self._last_picked = None
+            return "failed"
+        if check.get("trophies") != self._last_picked.get("trophies"):
+            self._last_picked["trophies"] = None
         self.window_controller.click(first_card[0], first_card[1], already_include_ratio=False)
         if self._sleep_interruptible(1.2, runtime_control, stop_event):
             return "aborted"
@@ -304,6 +336,7 @@ class LobbyAutomation:
             runtime_control=runtime_control)
 
     def select_brawler(self, brawler, get_latest_state, stop_event=None, runtime_control=None):
+        self._last_picked = None
         self.window_controller.screenshot()
         wr = self.window_controller.width_ratio
         hr = self.window_controller.height_ratio
@@ -344,6 +377,22 @@ class LobbyAutomation:
                 return "aborted"
 
             first_brawler_x, first_brawler_y = load_toml_as_dict("cfg/buttons_config.toml")["first_brawler_icon"]
+            import trophy_reader
+            if not trophy_reader.available():
+                print("Brawler selection requires OCR to verify the search result.")
+                return "failed"
+            frame = self.window_controller.screenshot()
+            card = trophy_reader.read_card(frame)
+            if normalize_brawler_filename(card.get("brawler") or "") != normalized_brawler:
+                print(f"Search result does not match {brawler_search_name}; selection cancelled.")
+                return "failed"
+            if self._sleep_interruptible(0.3, runtime_control, stop_event):
+                return "aborted"
+            check = trophy_reader.read_card(self.window_controller.screenshot())
+            if normalize_brawler_filename(check.get("brawler") or "") != normalized_brawler:
+                return "failed"
+            if check.get("trophies") != card.get("trophies"):
+                card["trophies"] = None
             self.window_controller.click(first_brawler_x, first_brawler_y, already_include_ratio=False)
             if self._sleep_interruptible(1, runtime_control, stop_event):
                 print("Brawler selection aborted by user.")
@@ -355,6 +404,9 @@ class LobbyAutomation:
                 print("Brawler selection aborted by user.")
                 return "aborted"
             self.window_controller.screenshot()
+            if get_latest_state() != "lobby":
+                return "stuck"
+            self._last_picked = {**card, "brawler": normalized_brawler}
             print("Selected brawler ", brawler_search_name)
             return "success"
 

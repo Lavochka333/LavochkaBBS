@@ -234,12 +234,14 @@
                 <div class="toggle-row">
                     <details class="disclosure" data-queue-details="${escapeHtml(key)}">
                         <summary>Очередь бойцов</summary>
-                        <div class="section-title">Бойцы выбираются автоматически</div>
+                        <div class="section-title">Выбрать одного бойца</div>
+                        <select class="input" data-brawler-select="${escapeHtml(key)}" aria-label="Боец"></select>
+                        <button class="btn btn-sm btn-primary" type="button" data-action="choose-brawler" data-key="${escapeHtml(key)}">Играть этим бойцом</button>
                         <div class="queue-list" data-queue="${escapeHtml(key)}">
                             <div class="queue-empty">Загрузка…</div>
                         </div>
                         <div class="auto-note">
-                            Сортировка по минимальным трофеям,
+                            Автоматическая ротация:
                             <span data-switch-after="${escapeHtml(key)}">7</span> боёв на бойца, затем переключение.
                         </div>
                     </details>
@@ -275,6 +277,7 @@
         if (signature !== cardKeys) {
             cardKeys = signature;
             grid.innerHTML = devices.map(deviceCard).join('');
+            loadBrawlers();
             devices.forEach((d) => {
                 if (queues[d.key]) renderQueue(d.key, queues[d.key], liveByKey[d.key]);
                 else loadQueue(d.key);
@@ -396,6 +399,7 @@
     // Each of these is a sort the game performs itself; the bot then takes the
     // first card. Named exactly as the menu does, so there is nothing to guess.
     const SORT_MODES = [
+        { value: 'selected', label: 'Выбранный боец' },
         { value: 'lowest_trophies', label: 'По минимальным трофеям' },
         { value: 'closest_to_rank', label: 'Ближе всех к новому рангу' },
         { value: 'lowest_level', label: 'По уровню (с низкого)' },
@@ -697,7 +701,7 @@
                      onerror="this.style.visibility='hidden'">
                 <div class="queue-item-body">
                     <div class="queue-item-name">${escapeHtml(item.brawler)}</div>
-                    <div class="queue-item-target">${current} трофеев</div>
+                    <div class="queue-item-target">${current} трофеев (сохранённая оценка)</div>
                 </div>
                 ${isLive ? '<span class="badge badge-running">сейчас</span>' : ''}
             </div>`;
@@ -733,6 +737,12 @@
 
     async function loadBrawlers() {
         const { data } = await api('/api/devices/brawlers');
+        if (!data || !Array.isArray(data.brawlers)) return;
+        grid.querySelectorAll('[data-brawler-select]').forEach((select) => {
+            const previous = select.value;
+            select.innerHTML = data.brawlers.map((b) => `<option value="${escapeHtml(b.name)}">${escapeHtml(b.name)}</option>`).join('');
+            if (previous) select.value = previous;
+        });
     }
 
     const queues = {};
@@ -820,7 +830,31 @@
         button.classList.add('is-busy');
 
         try {
-            if (action === 'start' || action === 'stop' || action === 'pause' || action === 'resume') {
+            if (action === 'choose-brawler') {
+                if (['starting', 'running', 'paused', 'pausing', 'stopping'].includes(runtimeStateOf(key))) {
+                    toast('Останови бота перед выбором бойца.', 'error');
+                    return;
+                }
+                const name = grid.querySelector(`[data-brawler-select="${cssEscape(key)}"]`).value;
+                if (!name) return;
+                const items = await loadQueue(key);
+                const entry = items.find((item) => item.brawler === name) || {
+                    brawler: name, type: 'trophies', trophies: 0, wins: 0,
+                    push_until: 1000, win_streak: 0,
+                };
+                entry.automatically_pick = true;
+                const saved = await api(`/api/devices/${encodeURIComponent(key)}/queue`, {
+                    method: 'POST', body: { items: [entry, ...items.filter((item) => item.brawler !== name)] },
+                });
+                if (!saved.ok) return;
+                const settings = await api(`/api/devices/${encodeURIComponent(key)}/settings`, {
+                    method: 'POST', body: { section: 'cfg/bot_config.toml', values: { brawler_pick_mode: 'selected' } },
+                });
+                if (!settings.ok) return;
+                toast(`Выбран ${name}. Нажми «Старт».`, 'ok');
+                await loadQueue(key);
+                await loadTelemetry();
+            } else if (action === 'start' || action === 'stop' || action === 'pause' || action === 'resume') {
                 button.disabled = true;
                 const { data } = await api(`/api/devices/${encodeURIComponent(key)}/${action}`, { method: 'POST' });
                 if (data && data.message) toast(data.message, data.ok ? 'ok' : 'error');

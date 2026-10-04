@@ -272,7 +272,7 @@ def save_brawler_data(data):
     """
     queue_path = brawler_queue_path()
     with open(queue_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=4)
+        json.dump(clean_queue(data), f, indent=4)
 
 
 def load_brawler_data():
@@ -300,7 +300,19 @@ def clear_brawler_data():
 
 def clean_queue(data):
     cleaned_data = []
+    seen = set()
     for brawler_data in data:
+        if not isinstance(brawler_data, dict):
+            continue
+        brawler_data = dict(brawler_data)
+        name = normalize_brawler_filename(brawler_data.get('brawler', ''))
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        brawler_data['brawler'] = name
+        for key, default in {'type': 'trophies', 'trophies': 0, 'wins': 0,
+                             'push_until': '', 'automatically_pick': True}.items():
+            brawler_data.setdefault(key, default)
         if brawler_data['type'] not in ["trophies", "wins"]:
             brawler_data['type'] = "trophies"
         type_of_push = brawler_data['type']
