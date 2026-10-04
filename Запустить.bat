@@ -1,44 +1,53 @@
 @echo off
 setlocal
+title LavochkaBBS - close this window to stop the bot
 cd /d "%~dp0"
 
 if exist "dist\quickexit\xlamBOT\xlamBOT.exe" (
-    start "" "dist\quickexit\xlamBOT\xlamBOT.exe"
+    "dist\quickexit\xlamBOT\xlamBOT.exe"
+    pause
     exit /b 0
 )
 
 if exist "dist\counters\xlamBOT\xlamBOT.exe" (
-    start "" "dist\counters\xlamBOT\xlamBOT.exe"
+    "dist\counters\xlamBOT\xlamBOT.exe"
+    pause
     exit /b 0
 )
 
 if exist "dist\encoding\xlamBOT\xlamBOT.exe" (
-    start "" "dist\encoding\xlamBOT\xlamBOT.exe"
+    "dist\encoding\xlamBOT\xlamBOT.exe"
+    pause
     exit /b 0
 )
 
 if exist "dist\selection\xlamBOT\xlamBOT.exe" (
-    start "" "dist\selection\xlamBOT\xlamBOT.exe"
+    "dist\selection\xlamBOT\xlamBOT.exe"
+    pause
     exit /b 0
 )
 
 if exist "dist\roster\xlamBOT\xlamBOT.exe" (
-    start "" "dist\roster\xlamBOT\xlamBOT.exe"
+    "dist\roster\xlamBOT\xlamBOT.exe"
+    pause
     exit /b 0
 )
 
 if exist "dist\current\xlamBOT\xlamBOT.exe" (
-    start "" "dist\current\xlamBOT\xlamBOT.exe"
+    "dist\current\xlamBOT\xlamBOT.exe"
+    pause
     exit /b 0
 )
 
 if exist "dist\repaired\xlamBOT\xlamBOT.exe" (
-    start "" "dist\repaired\xlamBOT\xlamBOT.exe"
+    "dist\repaired\xlamBOT\xlamBOT.exe"
+    pause
     exit /b 0
 )
 
 if exist "dist\xlamBOT\xlamBOT.exe" (
-    start "" "dist\xlamBOT\xlamBOT.exe"
+    "dist\xlamBOT\xlamBOT.exe"
+    pause
     exit /b 0
 )
 
