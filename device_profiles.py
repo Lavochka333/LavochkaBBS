@@ -79,10 +79,16 @@ def copy_repository_defaults(key: str) -> None:
 
 
 def read_settings(key: str) -> dict[str, Any]:
-    """The whole config tree for a device, as nested plain dicts."""
+    """The whole config tree for a device, as nested plain dicts.
+
+    Reads from the active config root, which under a profile is the device's
+    own folder. resolve_project_path("cfg") would always answer with the
+    repository's copy, so the panel displayed the shared values while saving
+    to the device, and a reload appeared to undo the save.
+    """
     with use_profile(key):
         settings: dict[str, Any] = {}
-        for path in utils.resolve_project_path("cfg").glob("*.toml"):
+        for path in utils.get_config_root().glob("*.toml"):
             try:
                 settings[path.stem] = utils.load_toml_as_dict(path)
             except Exception:  # noqa: BLE001
