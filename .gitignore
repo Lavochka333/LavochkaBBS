@@ -77,3 +77,10 @@ exe_test.err
 cfg/cfg.zip
 cfg/match_history.corrupt-*.csv
 
+# переносимый Tesseract: чужая сборка на 163 МБ, в репозитории ей не место.
+# Собирается скриптом build_installer.ps1, в установщик попадает оттуда.
+vendor/tesseract/
+
+
+# мои бэкапы конфигов и модели: личные копии, в репозиторий не нужны
+_backups/

@@ -16,7 +16,11 @@ does not restart when the brawler changes.
 """
 from __future__ import annotations
 
+import os
+import pathlib
 import re
+import shutil
+import sys
 
 import cv2
 import numpy as np
@@ -24,19 +28,48 @@ import numpy as np
 try:
     import pytesseract
 
-    # Tesseract ships outside PATH on this machine, so point at it directly.
-    for candidate in (
-        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
-        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
-    ):
+    # Сначала ищем переносимую копию, которая едет вместе с программой: у
+    # установленного пользователя своего Tesseract может не быть, и раньше
+    # читать трофеи было просто нечем. Папка vendor лежит рядом с проектом,
+    # а в собранной программе - в _internal.
+    TESSERACT_PATH = ""
+
+    def _tesseract_candidates():
+        roots = []
+        if getattr(sys, "frozen", False):
+            roots.append(getattr(sys, "_MEIPASS", ""))
+        roots.append(str(pathlib.Path(__file__).resolve().parent))
+
+        for root in roots:
+            if not root:
+                continue
+            yield os.path.join(root, "vendor", "tesseract", "tesseract.exe")
+
+        # Системные установки - последним выбором, чтобы рабочая копия
+        # пользователя не перебивала ту, что мы положили рядом.
+        for env in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
+            base = os.environ.get(env)
+            if base:
+                yield os.path.join(base, "Tesseract-OCR", "tesseract.exe")
+        yield shutil.which("tesseract") or ""
+
+    for candidate in _tesseract_candidates():
+        if not candidate or not os.path.isfile(candidate):
+            continue
         try:
             pytesseract.pytesseract.tesseract_cmd = candidate
+            # Проверяем не только по existence файла: папка может найтись, а
+            # запуститься exe не сможет - не хватит DLL.
+            pytesseract.get_tesseract_version()
+            TESSERACT_PATH = candidate
             break
         except Exception:  # noqa: BLE001
             continue
-    OCR_AVAILABLE = True
+
+    OCR_AVAILABLE = bool(TESSERACT_PATH)
 except Exception:  # noqa: BLE001
     OCR_AVAILABLE = False
+    TESSERACT_PATH = ""
 
 # The per-brawler trophy count, in the 1920x1080 base the rest of the project
 # uses. It sits in the centre of the lobby next to the prestige badge, not in

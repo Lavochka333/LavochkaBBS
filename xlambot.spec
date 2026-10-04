@@ -31,6 +31,7 @@ DATA = [
     ("static", "static"),
     ("templates", "templates"),
     ("api/assets", "api/assets"),
+    ("vendor/tesseract", "vendor/tesseract"),
     ("LICENSE", "."),
     # Очередь бойцов по умолчанию: без неё собранная программа
     # стартует с пустым списком и отказывается запускать игру.

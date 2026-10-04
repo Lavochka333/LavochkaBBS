@@ -42,9 +42,23 @@ def config_root_for(key: str) -> Path:
 
 
 def ensure_profile(key: str) -> Path:
-    """Make sure the device has a profile directory; return its path."""
+    """Make sure the device has a profile directory; return its path.
+
+    A profile is seeded with the shipped cfg whenever its cfg folder holds no
+    toml yet - not only when the folder itself is new. An interrupted first run
+    leaves the folder behind and empty, and checking only for the folder's
+    existence left such a profile permanently without settings. The seeding is
+    per-file and never overwrites, so it only ever fills gaps.
+    """
     base = profile_dir(key)
     (base / "cfg").mkdir(parents=True, exist_ok=True)
+    if not any((base / "cfg").glob("*.toml")):
+        try:
+            copy_repository_defaults(key)
+        except Exception:  # noqa: BLE001
+            # Отсутствие значений по умолчанию не повод отказывать в профиле:
+            # панель покажет пустое, но устройство будет работать.
+            pass
     return base
 
 
