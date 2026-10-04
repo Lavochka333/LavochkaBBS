@@ -103,6 +103,28 @@ function Build-App {
         throw "В сборке всего $count бойцов - очередь собралась неверно"
     }
 
+    # Таблица бойцов: без неё play.py не находит ни одного бойца. Раньше её
+    # теряли вместе с match_history, потому что фильтровали по *.toml.
+    $table = Join-Path $AppDir '_internal\cfg\brawlers_info.json'
+    if (-not (Test-Path $table)) {
+        throw 'В сборке нет cfg/brawlers_info.json - бот не будет знать бойцов'
+    }
+    $known = @(Get-Content $table -Raw -Encoding UTF8 | ConvertFrom-Json |
+        ForEach-Object { $_.PSObject.Properties.Name }).Length
+    $unknown = @($parsed | Where-Object { $known -notcontains $_.brawler }).Count
+    Write-Host "  таблица бойцов: $known, неизвестных имён в очереди: $unknown" -ForegroundColor Green
+    if ($unknown -gt 0) {
+        throw "В очереди $unknown имён, которых нет в таблице бойцов"
+    }
+
+    # Личные файлы в сборку попадать не должны.
+    $leaks = Get-ChildItem (Join-Path $AppDir '_internal') -Recurse -File -EA SilentlyContinue |
+        Where-Object { $_.Name -match 'match_history|cfg\.zip|account_state' }
+    if ($leaks) {
+        throw "В сборку попали личные файлы: $($leaks.Name -join ', ')"
+    }
+    Write-Host "  личных файлов нет" -ForegroundColor Green
+
     $size = [math]::Round(((Get-ChildItem $AppDir -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), 1)
     Write-Host "  готово: $size МБ" -ForegroundColor Green
 }

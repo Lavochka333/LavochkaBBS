@@ -21,11 +21,19 @@ from PyInstaller.utils.hooks import collect_submodules
 
 ROOT = Path(SPECPATH)
 
-# Из cfg берём только .toml. Копировать папку целиком нельзя: рядом с ними
-# лежит match_history.csv с историей матчей того, кто собирал, и cfg.zip с её
-# резервной копией. Всё это уезжало бы к пользователю установки вместе с
-# программой. Список строится здесь, на лету, чтобы новый .toml не забыли.
+# Из cfg берём только настройки и таблицу бойцов. Копировать папку целиком
+# нельзя: рядом с ними лежит match_history.csv с историей матчей того, кто
+# собирал, и cfg.zip с её резервной копией. Всё это уезжало бы к пользователю
+# установки вместе с программой. Список строится здесь, на лету, чтобы новый
+# файл настроек не забыли.
+#
+# brawlers_info.json обязателен и не является .toml: без него play.py не
+# находит ни одного бойца и сыплет KeyError на каждом шаге.
 CFG_FILES = [(str(path), "cfg") for path in sorted(ROOT.glob("cfg/*.toml"))]
+BRAWLERS_TABLE = ROOT / "cfg" / "brawlers_info.json"
+if not BRAWLERS_TABLE.is_file():
+    raise SystemExit("cfg/brawlers_info.json не найден - без него бот не узнает бойцов")
+CFG_FILES.append((str(BRAWLERS_TABLE), "cfg"))
 
 # ── данные, которые копируются рядом с программой ─────────────────────────
 DATA = [
