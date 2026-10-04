@@ -679,12 +679,6 @@ select.input {
 /* Раскрытая секция занимает всю ширину ряда, иначе логи некуда положить */
 .toggle-row .disclosure[open] { grid-column: 1 / -1; }
 
-.tool-row { display: flex; gap: 4px; flex-wrap: wrap; }
-.tool-result { font-size: 11.5px; color: var(--text-dim); white-space: pre-wrap; word-break: break-word; }
-.tool-result:empty { display: none; }
-.tool-result.is-ok { color: #86e8c2; }
-.tool-result.is-error { color: #ffa3aa; }
-
 .log-console {
     max-height: 190px;
     overflow-y: auto;

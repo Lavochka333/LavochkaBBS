@@ -90,7 +90,7 @@ def run_wizard() -> int:
         return setup_wizard.main()
     except Exception as error:  # noqa: BLE001
         print(f"Мастер настройки не отработал: {error}")
-        print("Разбираться можно в панели: раздел «Диагностика».")
+        print("Разбираться можно в панели: статус устройства и логи.")
         return 1
 
 

@@ -235,16 +235,6 @@
                         </div>
                     </details>
 
-                    <details class="disclosure" data-tool-details="${escapeHtml(key)}">
-                        <summary>Диагностика</summary>
-                        <div class="tool-row">
-                            <button class="btn btn-sm btn-ghost" data-action="selftest" data-key="${escapeHtml(key)}" data-serial="${escapeHtml(device.serial)}">Проверить видео</button>
-                            <button class="btn btn-sm btn-ghost" data-action="prepare" data-key="${escapeHtml(key)}" data-serial="${escapeHtml(device.serial)}">Выставить 1920×1080</button>
-                            <button class="btn btn-sm btn-ghost" data-action="reset-display" data-key="${escapeHtml(key)}" data-serial="${escapeHtml(device.serial)}">Сбросить экран</button>
-                        </div>
-                        <div class="tool-result" data-tool="${escapeHtml(key)}"></div>
-                    </details>
-
                     <details class="disclosure" data-details="${escapeHtml(key)}" ${expanded[key] ? 'open' : ''}>
                         <summary>Логи</summary>
                         <div class="log-console" data-logs="${escapeHtml(key)}">—</div>
@@ -439,7 +429,7 @@
             stateEl.title = stale
                 ? `Последний кадр пришёл ${Math.round(age)} с назад. Поток видео, `
                   + 'скорее всего, завис: бот жив, но ничего не видит. '
-                  + 'Помогает «Сбросить экран» в диагностике устройства.'
+                  + 'Помогает перезапуск бота.'
                 : (telemetry.detected_state === 'connection_lost'
                     ? 'Игра потеряла связь с сервером и показывает окно с кнопкой '
                       + '«RETRY LOGIN». Бот закрывает его сам.'
@@ -898,19 +888,6 @@
                 await api(`/api/devices/${encodeURIComponent(key)}/logs`, { method: 'DELETE' });
                 lastLogText[key] = [];
                 renderLogs(key, []);
-            } else if (action === 'selftest' || action === 'prepare' || action === 'reset-display') {
-                const serial = button.dataset.serial;
-                const box = grid.querySelector(`[data-tool="${cssEscape(key)}"]`);
-                if (box) box.textContent = 'Выполняется…';
-                button.disabled = true;
-                const { data } = await api('/api/devices/' + action, { method: 'POST', body: { serial } });
-                if (box) {
-                    box.textContent = (data && data.message) ? data.message : 'Готово';
-                    box.className = 'tool-result ' + (data && data.ok ? 'is-ok' : 'is-error');
-                }
-                if (data && data.message) toast(data.message, data.ok ? 'ok' : 'error');
-                button.disabled = false;
-                if (action !== 'selftest') await loadDevices();
             }
         } catch (error) {
             toast('Ошибка: ' + error.message, 'error');

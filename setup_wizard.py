@@ -126,7 +126,6 @@ def check_resolution(adb: str, serial: str) -> tuple[int, int] | None:
         print("  Верно, бот будет работать точно по координатам.")
     else:
         print(f"  Нужно {EXPECTED_WIDTH}x{EXPECTED_HEIGHT}, иначе бот промахивается.")
-        print("  В панели: Диагностика → «Выставить 1920x1080».")
         print("  Либо вручную: adb -s %s shell wm size %sx%s"
               % (serial, EXPECTED_WIDTH, EXPECTED_HEIGHT))
     return size
@@ -234,7 +233,7 @@ def main() -> int:
     print()
     print("  Дальше:")
     print("   - откройте панель, в ней виден статус и кнопка «Старт»;")
-    print("   - если что-то не так, нажмите «Диагностика» прямо в карточке устройства;")
+    print("   - если что-то не так, откройте логи в карточке устройства;")
     print("   - вопросы и обновления: https://t.me/xlamModz")
     print()
     return 0
