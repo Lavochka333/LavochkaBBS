@@ -3,6 +3,12 @@ setlocal
 title LavochkaBBS - close this window to stop the bot
 cd /d "%~dp0"
 
+if exist "dist\cpu-fallback\xlamBOT\xlamBOT.exe" (
+    "dist\cpu-fallback\xlamBOT\xlamBOT.exe"
+    pause
+    exit /b 0
+)
+
 if exist "dist\quickexit\xlamBOT\xlamBOT.exe" (
     "dist\quickexit\xlamBOT\xlamBOT.exe"
     pause

@@ -190,6 +190,9 @@ class Detect:
         so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         so.intra_op_num_threads = self.optimal_threads_amount
         so.inter_op_num_threads = self.optimal_threads_amount
+        if "DmlExecutionProvider" in providers:
+            so.enable_mem_pattern = False
+            so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
         model = ort.InferenceSession(self.model_path, sess_options=so, providers=providers)
 
         used_provider = model.get_providers()[0]
@@ -254,10 +257,18 @@ class Detect:
 
         preprocessed_img, resized_w, resized_h = self.preprocess_image(img)
 
-        outputs = self.model.run(
-            None,
-            {self.input_name: preprocessed_img}
-        )
+        try:
+            outputs = self.model.run(None, {self.input_name: preprocessed_img})
+        except Exception as error:
+            if self.device == "CPUExecutionProvider":
+                raise
+            # Native GPU errors can themselves fail UTF-8 decoding on Windows.
+            # Rebuild a CPU-only session and retry the same frame once.
+            print(f"GPU inference failed ({type(error).__name__}); switching this detector to CPU.")
+            self.preferred_device = "cpu"
+            self.model, self.device = self.load_model()
+            self.input_name = self.model.get_inputs()[0].name
+            outputs = self.model.run(None, {self.input_name: preprocessed_img})
 
         detections = self.postprocess(
             outputs,
