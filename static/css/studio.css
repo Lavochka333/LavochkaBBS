@@ -64,6 +64,18 @@
 
 .studio-header-right { display: flex; align-items: center; gap: 7px; margin-left: auto; flex-wrap: wrap; }
 
+/* Ссылка на канал — единственное, что уводит с программы, поэтому подсвечена
+   иначе, чем кнопки, которые меняют состояние. */
+.channel-link {
+    border-color: rgba(84, 178, 255, 0.34);
+    color: #8ecbff;
+}
+.channel-link:hover {
+    border-color: rgba(84, 178, 255, 0.6);
+    color: #b6ddff;
+    background: rgba(84, 178, 255, 0.1);
+}
+
 .studio-main { padding: 14px 18px 32px; max-width: 1180px; }
 .studio-view { display: none; }
 .studio-view.is-active { display: block; animation: studio-in 0.16s ease; }
