@@ -189,13 +189,6 @@
             <div class="device-body">
                 ${runtime.last_error ? `<div class="error-box">${escapeHtml(runtime.last_error)}</div>` : ''}
 
-                <div class="mode-row" data-mode-row="${escapeHtml(key)}">
-                    <label class="mode-label" for="mode-${escapeHtml(key)}">Режим игры</label>
-                    <select id="mode-${escapeHtml(key)}" class="input mode-select" data-mode-select="${escapeHtml(key)}">
-                        <option value="">не менять</option>
-                    </select>
-                </div>
-
                 <div class="controls">
                     <button class="btn btn-primary" data-action="start" data-key="${escapeHtml(key)}" ${startDisabled ? 'disabled' : ''}>Старт</button>
                     <button class="btn ${pauseClass}" data-action="${pauseAction}" data-key="${escapeHtml(key)}" ${isRunning ? '' : 'disabled'}>${pauseLabel}</button>
@@ -266,7 +259,6 @@
         if (signature !== cardKeys) {
             cardKeys = signature;
             grid.innerHTML = devices.map(deviceCard).join('');
-        fillModeSelects();
             devices.forEach((d) => {
                 if (queues[d.key]) renderQueue(d.key, queues[d.key], liveByKey[d.key]);
                 else loadQueue(d.key);
@@ -366,35 +358,6 @@
         { value: 'most_trophies', label: 'По максимальным трофеям' },
         { value: 'by_name', label: 'По имени' },
     ];
-
-    let modeCatalog = null;
-
-    function fillModeSelects() {
-        if (!modeCatalog) return;
-        document.querySelectorAll('[data-mode-select]').forEach((select) => {
-            if (select.dataset.filled === '1') return;
-            const current = select.dataset.mode || '';
-            select.innerHTML = '<option value="">не менять</option>'
-                + modeCatalog.map((m) => {
-                    const mark = m.calibrated ? '' : ' — не откалиброван';
-                    return `<option value="${escapeHtml(m.key)}">${escapeHtml(m.name + mark)}</option>`;
-                }).join('');
-            select.value = current;
-            select.dataset.filled = '1';
-        });
-    }
-
-    async function loadModes() {
-        try {
-            // Goes through api() so the panel token is sent, otherwise it is 403.
-            const { data } = await api('/api/devices/modes');
-            if (!data || !data.ok) return;
-            modeCatalog = data.modes || [];
-            fillModeSelects();
-        } catch (err) {
-            console.warn('не удалось загрузить режимы', err);
-        }
-    }
 
     function renderTelemetry(key, telemetry) {
         const live = { brawler: telemetry.brawler, trophies: telemetry.trophies };
@@ -793,29 +756,6 @@
     }
 
     /* ---------------------------------------------------------------- events */
-    grid.addEventListener('change', async (event) => {
-        const select = event.target.closest('[data-mode-select]');
-        if (!select) return;
-        const key = select.dataset.modeSelect;
-        const mode = select.value;
-        try {
-            const { data } = await api(`/api/devices/${encodeURIComponent(key)}/mode`, {
-                method: 'POST',
-                body: JSON.stringify({ mode }),
-            });
-            if (data && data.ok) {
-                toast(mode ? `Режим: ${mode}` : 'Режим игры не меняется', 'ok');
-                if (mode && data.calibrated === false) {
-                    toast('Координаты режима не откалиброваны — нажмите «Калибровать»', 'warn');
-                }
-            } else if (data && data.message) {
-                toast(data.message, 'error');
-            }
-        } catch (err) {
-            toast('Не удалось сохранить режим', 'error');
-        }
-    });
-
     grid.addEventListener('click', async (event) => {
         const button = event.target.closest('[data-action]');
         if (!button) return;
@@ -919,8 +859,6 @@
             if (!wasOpen) loadLogs();
         }
     }, true);
-
-    loadModes();
 
     document.getElementById('refreshBtn').addEventListener('click', async () => {
         await loadDevices();

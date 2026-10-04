@@ -495,27 +495,6 @@ select.input {
     word-break: break-word;
 }
 
-/* ───────────────────────── режим ───────────────────────── */
-
-.mode-row {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 5px 7px;
-    background: var(--surface-2);
-    border: 1px solid var(--line-soft);
-    border-radius: var(--r-xs);
-}
-.mode-label {
-    font-size: 8.5px;
-    font-weight: 700;
-    letter-spacing: 0.07em;
-    text-transform: uppercase;
-    color: var(--text-faint);
-    white-space: nowrap;
-}
-.mode-select { flex: 1 1 auto; }
-
 /* ───────────────────────── управление ───────────────────────── */
 
 .controls { display: flex; gap: 5px; }
