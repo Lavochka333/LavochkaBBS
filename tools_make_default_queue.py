@@ -5,13 +5,13 @@
 программа брала его с собой и показывала на старте ноль бойцов: играть было
 нечем, пока бот не наткнулся бы на кого-то сам.
 
-Скрипт идёт от иконок: имена файлов в api/assets/brawler_icons и
-brawler_icons2 - это и есть перечень бойцов, который панель и так показывает
-в списке доступных. Один и тот же боец может лежать в обеих папках, поэтому
-имена объединяются, а к списку добавляются те, у кого иконки нет (jess) -
-иначе он не был бы виден в панели.
+Источник имён - cfg/brawlers_info.json, а не папки с иконками. Иконки названы
+как попало: рядом лежат и 8bit.png, и 8-bit.png, плюс el primo, r-t, mr p.
+Такое имя игра никогда не вернёт, а бот ищет бойца обычным обращением к
+словарю, поэтому лишнее имя в очереди роняет плейстайл с KeyError. Канонические
+имена берём из таблицы, к которой в итоге и идут все обращения.
 
-    python -B tools_make_default_queue.py <куда положить.json>
+    python -B tools_make_default_queue.py [куда положить.json]
 """
 
 from __future__ import annotations
@@ -21,22 +21,16 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent
-
-ICON_DIRS = ("api/assets/brawler_icons", "api/assets/brawler_icons2")
-
-# Бойцы без иконки. Список рядом с иконками держать нельзя: иконки - это
-# единственное, что попадает в сборку, а забытый здесь боец просто выпадает
-# из панели молча.
-EXTRA_BRAWLERS = ("jess",)
+sys.path.insert(0, str(ROOT))
 
 
-def collect() -> list[str]:
-    names: set[str] = set()
-    for folder in ICON_DIRS:
-        for item in (ROOT / folder).glob("*"):
-            if item.is_file():
-                names.add(item.stem.lower())
-    names.update(EXTRA_BRAWLERS)
+def canonical_names() -> list[str]:
+    """Канонические имена бойцов из таблицы, на которую опирается play.py."""
+    from utils import load_brawlers_info
+
+    names = [str(key) for key in load_brawlers_info().keys()]
+    if not names:
+        raise RuntimeError("brawlers_info.json пуст или не читается")
     return sorted(names)
 
 
@@ -54,14 +48,24 @@ def build() -> list[dict]:
             "automatically_pick": True,
             "win_streak": 0,
         }
-        for name in collect()
+        for name in canonical_names()
     ]
 
 
 def main() -> int:
-    queue = build()
-    if not queue:
-        print("Ни одного бойца не нашлось - проверьте папки с иконками.", flush=True)
+    try:
+        queue = build()
+    except Exception as error:  # noqa: BLE001
+        print(f"Не удалось собрать очередь: {error}")
+        return 1
+
+    # Проверяем сами себя: имя, которого нет в таблице, уронит плейстайл.
+    from utils import load_brawlers_info
+
+    known = set(load_brawlers_info().keys())
+    unknown = [e["brawler"] for e in queue if e["brawler"] not in known]
+    if unknown:
+        print(f"В очереди есть чужие имена: {unknown}")
         return 1
 
     target = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "latest_brawler_data.json"
