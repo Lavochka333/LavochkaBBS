@@ -92,9 +92,11 @@
         document.querySelectorAll('.studio-tab').forEach((button) => {
             button.classList.toggle('is-active', button.dataset.tab === name);
         });
-        Object.keys(viewers).forEach((key) => {
-            const el = view(key);
-            if (el) el.classList.toggle('is-active', key === name);
+        // Секции перебираем по разметке, а не по таблице в коде: прежний
+        // список был пустым, из-за чего вкладка наполнялась содержимым, но
+        // оставалась скрытой - .studio-view без .is-active имеет display: none.
+        document.querySelectorAll('.studio-view').forEach((el) => {
+            el.classList.toggle('is-active', el.id === 'view-' + name);
         });
         // Перезапускаем таймер: у закрытой вкладки опроса быть не должно.
         Object.keys(pollers).forEach((key) => {
@@ -104,8 +106,6 @@
         loaders[name]();
         pollers[name] = setInterval(loaders[name], name === 'dashboard' ? 2500 : 6000);
     }
-
-    const viewers = {};
 
     document.getElementById('tabs').addEventListener('click', (event) => {
         const button = event.target.closest('.studio-tab');
