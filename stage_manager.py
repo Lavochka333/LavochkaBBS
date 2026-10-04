@@ -137,6 +137,11 @@ class StageManager:
     # The fourth column is cut off by the screen edge, so it is not usable.
     CARD_GRID_SIZE = 9
 
+    # Сколько раз подряд можно повторять выбор бойца, прежде чем сдаться.
+    # Раньше повторов не было вовсе, и на несовместимой сортировке бот висел
+    # в меню выбора бесконечно.
+    BRAWLER_PICK_ATTEMPTS = 3
+
     BRAWLER_SORT_MODES = {
         "lowest_trophies": "brawlers_sort_least_trophies",
         "closest_to_rank": "brawlers_sort_closest_to_next_tier",
@@ -387,18 +392,38 @@ class StageManager:
             next_brawler_name = self.brawlers_pick_data[0]['brawler']
             if self.brawlers_pick_data[0]["automatically_pick"]:
                 select_brawler = self.Lobby_automation.select_brawler(next_brawler_name, self.get_latest_state, runtime_control=self.runtime_control)
-                while select_brawler in ["failed", "error"]:
+                # Повторов было безгранично много, а боец ниже кладётся обратно
+                # в очередь, поэтому повторялся ровно тот же выбор: на
+                # сортировке, не совпадающей с порядком очереди, бот так и висел
+                # в меню выбора бойца. Считаем попытки и уходим.
+                for _try in range(self.BRAWLER_PICK_ATTEMPTS):
+                    if select_brawler not in ("failed", "error", "aborted", "stuck"):
+                        break
                     if self.ping_when_stuck:
                         screenshot = self.window_controller.screenshot()
                         notify_user("bot_failed_brawler_selection", screenshot, self)
-                        print(f"Skipping {select_brawler}")
                     if self._should_stop() or self._should_pause():
                         return
-                    current_brawler = self.brawlers_pick_data.pop(0)
-                    self.brawlers_pick_data.append(current_brawler)
-                    next_brawler_name = self.brawlers_pick_data[0]['brawler']
+                    print(f"Skipping {select_brawler}, attempt {_try + 1} "
+                          f"of {self.BRAWLER_PICK_ATTEMPTS}")
+                    if self._sleep_interruptible(2):
+                        return
+                    # Уводим непокорного бойца в конец очереди, иначе повтор
+                    # был бы тем же самым выбором.
                     self.quit_shop()
-                    select_brawler = self.Lobby_automation.select_brawler(next_brawler_name, self.get_latest_state, runtime_control=self.runtime_control)
+                    stuck = self.brawlers_pick_data.pop(0)
+                    self.brawlers_pick_data.append(stuck)
+                    if len(self.brawlers_pick_data) > 1:
+                        self.brawlers_pick_data.insert(
+                            0, self.brawlers_pick_data.pop(1))
+                    next_brawler_name = self.brawlers_pick_data[0]['brawler']
+                    select_brawler = self.Lobby_automation.select_brawler(
+                        next_brawler_name, self.get_latest_state,
+                        runtime_control=self.runtime_control)
+                else:
+                    print(f"Brawler selection failed after {self.BRAWLER_PICK_ATTEMPTS} "
+                          "attempts; continuing without a switch instead of "
+                          "retrying forever.")
                 if select_brawler == "aborted" or select_brawler == "stuck":
                     return
                 if select_brawler == "success":

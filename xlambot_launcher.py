@@ -102,7 +102,50 @@ def open_ui(url: str) -> None:
         pass
 
 
+# Имя мьютекса одинаковое для всех сборок, без версии: обновление должно
+# узнавать запущенный экземпляр, иначе установщик не сможет его закрыть.
+SINGLE_INSTANCE_MUTEX = "xlamBOT_single_instance"
+
+_mutex_handle = None
+
+
+def claim_single_instance() -> bool:
+    """Занять мьютекс единственного запуска. False - программа уже открыта.
+
+    Нужен по двум причинам. Установщик по этому мьютексу находит запущенный
+    xlamBOT.exe и закрывает его сам вместо ошибки. И, что важнее, два
+    экземпляра нельзя оставлять: они берут один и тот же порт и device
+    профиль, из-за чего получается два бота на одном устройстве.
+    """
+    global _mutex_handle
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        kernel32.CreateMutexW.restype = ctypes.c_void_p
+        kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
+        handle = kernel32.CreateMutexW(None, True, SINGLE_INSTANCE_MUTEX)
+        if not handle:
+            # Не смогли создать - не блокируем запуск: отсутствие защиты
+            # лучше, чем отказ работать.
+            return True
+        if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+            kernel32.CloseHandle(handle)
+            return False
+        _mutex_handle = handle  # держим открытым до конца процесса
+        return True
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def main() -> int:
+    if not claim_single_instance():
+        print("xlamBOT уже запущен. Закройте окно программы и попробуйте снова.")
+        print("Если окна нет, возможно программа запущена свёрнутым значком в трее.")
+        return 3
+
     root = bundled_root()
     os.chdir(root)
 

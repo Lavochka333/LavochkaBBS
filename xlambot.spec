@@ -21,9 +21,15 @@ from PyInstaller.utils.hooks import collect_submodules
 
 ROOT = Path(SPECPATH)
 
+# Из cfg берём только .toml. Копировать папку целиком нельзя: рядом с ними
+# лежит match_history.csv с историей матчей того, кто собирал, и cfg.zip с её
+# резервной копией. Всё это уезжало бы к пользователю установки вместе с
+# программой. Список строится здесь, на лету, чтобы новый .toml не забыли.
+CFG_FILES = [(str(path), "cfg") for path in sorted(ROOT.glob("cfg/*.toml"))]
+
 # ── данные, которые копируются рядом с программой ─────────────────────────
 DATA = [
-    ("cfg", "cfg"),
+    *CFG_FILES,
     ("images", "images"),
     ("models", "models"),
     ("playstyles", "playstyles"),

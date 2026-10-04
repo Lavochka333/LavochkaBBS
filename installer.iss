@@ -29,6 +29,13 @@ WizardStyle=modern
 PrivilegesRequiredOverridesAllowed=dialog
 PrivilegesRequired=lowest
 ArchitecturesInstallIn64BitMode=x64compatible
+; Программа держит именованный мьютекс, и по нему установщик находит
+; запущенный экземпляр и закрывает его сам. Без этой строки переустановка
+; поверх работающей программы упирается в ошибку "Setup was unable to
+; automatically close all applications".
+AppMutex=xlamBOT_single_instance
+CloseApplications=yes
+RestartApplications=no
 UninstallDisplayIcon={app}\{#AppExeName}
 ; Подсказка на случай, если у человека нет эмулятора
 ChangesAssociations=no
