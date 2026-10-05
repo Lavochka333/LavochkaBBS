@@ -1,0 +1,133 @@
+{"name": "Осторожная засада", "description": "Укрытие в кустах, восстановление ХП и короткая засада на одиночного врага. При неизвестном ХП не начинает бой.", "brawlers": ["all"], "gamemodes": ["all"], "author": "Custom", "date": "2026-10-05"}
+
+LOW_HP = 0.35
+RECOVERED_HP = 0.75
+AMBUSH_SECONDS = 1.4
+
+now = time.time()
+pos = get_entity_pos(player_data)
+safe_range, attack_range, super_range = get_brawler_range(brawler)
+info = brawlers_info.get(brawler) or {}
+state = persistent_data.setdefault("cautious_ambush", {})
+state.setdefault("recovering", False)
+state.setdefault("ambush_until", 0.0)
+state.setdefault("cooldown_until", 0.0)
+state.setdefault("last_hp", None)
+state.setdefault("last_damage", -100.0)
+
+hp = player_health_ratio
+if hp is not None:
+    previous = state["last_hp"]
+    if previous is not None and hp < previous - .04:
+        state["last_damage"] = now
+    state["last_hp"] = hp
+    if hp <= LOW_HP:
+        state["recovering"] = True
+    elif hp >= RECOVERED_HP:
+        state["recovering"] = False
+cautious = hp is None or state["recovering"] or now - state["last_damage"] < 3.0
+
+nearest = None
+nearest_distance = 1000000.0
+nearby = 0
+for enemy in enemy_data:
+    ep = get_entity_pos(enemy)
+    distance = get_distance(ep, pos)
+    if distance < nearest_distance:
+        nearest, nearest_distance = ep, distance
+    if distance < max(attack_range, TILE_SIZE * 5):
+        nearby += 1
+
+def overlaps_gas(box):
+    for gas in gas_boxes:
+        if box[0] < gas[2] and box[2] > gas[0] and box[1] < gas[3] and box[3] > gas[1]:
+            return True
+    return False
+
+def inside_bush(box):
+    margin = min(TILE_SIZE * .15, (box[2] - box[0]) * .2, (box[3] - box[1]) * .2)
+    return box[0] + margin <= pos[0] <= box[2] - margin and box[1] + margin <= pos[1] <= box[3] - margin
+
+def move_to(target):
+    dx, dy = target[0] - pos[0], target[1] - pos[1]
+    if math.hypot(dx, dy) < TILE_SIZE * .15:
+        return (0, 0)
+    for move in [(dx, dy), (dx, 0), (0, dy), (-dy, dx), (dy, -dx)]:
+        if math.hypot(*move) > 1 and not is_path_blocked(player_data, move, walls):
+            return move
+    return (0, 0)
+
+cover = None
+cover_score = 1000000.0
+hidden = False
+for bush in bushes:
+    if overlaps_gas(bush):
+        continue
+    centre = get_entity_pos(bush)
+    travel = get_distance(centre, pos)
+    threatened = False
+    for enemy in enemy_data:
+        ep = get_entity_pos(enemy)
+        if get_distance(ep, centre) < TILE_SIZE * 2:
+            threatened = True
+        # Do not cross a visible enemy to reach cover.
+        dx, dy = centre[0] - pos[0], centre[1] - pos[1]
+        length2 = dx * dx + dy * dy
+        t = max(0., min(1., ((ep[0] - pos[0]) * dx + (ep[1] - pos[1]) * dy) / max(1., length2)))
+        if get_distance(ep, (pos[0] + t * dx, pos[1] + t * dy)) < TILE_SIZE * 1.5:
+            threatened = True
+    if threatened:
+        continue
+    is_inside = inside_bush(bush)
+    score = 0.0 if is_inside else travel
+    if not is_inside and is_path_blocked(player_data, (centre[0] - pos[0], centre[1] - pos[1]), walls):
+        score += TILE_SIZE * 8
+    if score < cover_score:
+        cover, cover_score, hidden = centre, score, is_inside
+
+# A geometric hiding estimate: enemies may still see the bot after damage.
+can_ambush = (hidden and not cautious and nearby == 1 and nearest is not None
+              and nearest_distance <= min(attack_range, TILE_SIZE * 3)
+              and now >= state["cooldown_until"]
+              and is_enemy_hittable(pos, nearest, walls, "attack"))
+if can_ambush and state["ambush_until"] <= now:
+    state["ambush_until"] = now + AMBUSH_SECONDS
+    state["cooldown_until"] = now + 6.0
+if cautious or nearby > 1 or nearest is None or nearest_distance > attack_range:
+    state["ambush_until"] = 0.0
+ambushing = state["ambush_until"] > now
+
+movement = (0, 0)
+if ambushing:
+    movement = move_to(nearest) if nearest_distance > min(safe_range, TILE_SIZE * 1.5) else (0, 0)
+elif cover is not None:
+    movement = (0, 0) if hidden else move_to(cover)
+elif nearest is not None and (cautious or nearby):
+    movement = move_to((pos[0] * 2 - nearest[0], pos[1] * 2 - nearest[1]))
+else:
+    # Search slowly when no bush is visible; never follow a departing enemy.
+    direction = state.setdefault("search_direction", random.choice([(0, -JOYSTICK_RADIUS), (JOYSTICK_RADIUS, 0), (-JOYSTICK_RADIUS, 0)]))
+    if is_path_blocked(player_data, direction, walls):
+        direction = (-direction[1], direction[0])
+        state["search_direction"] = direction
+    movement = direction if not is_path_blocked(player_data, direction, walls) else (0, 0)
+
+holding = persistent_data.get("time_since_holding_attack")
+must_hold = must_brawler_hold_attack(brawler, brawlers_info)
+if holding is not None and (not ambushing or now - holding >= info.get("hold_attack", 0) + seconds_to_hold_attack_after_reaching_max):
+    attack(touch_up=True, touch_down=False)
+    persistent_data["time_since_holding_attack"] = None
+    holding = None
+if ambushing and is_enemy_hittable(pos, nearest, walls, "attack"):
+    if is_super_ready and holding is None and nearest_distance <= super_range and is_enemy_hittable(pos, nearest, walls, "super"):
+        if is_hypercharge_ready:
+            use_hypercharge()
+        use_super()
+    if not must_hold:
+        attack()
+    elif holding is None:
+        attack(touch_up=False, touch_down=True)
+        persistent_data["time_since_holding_attack"] = now
+    elif now - holding >= info.get("hold_attack", 0):
+        attack(touch_up=True, touch_down=False)
+        persistent_data["time_since_holding_attack"] = None
